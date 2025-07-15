@@ -1,0 +1,254 @@
+Starting Processor Sharing Simulation
+Number of arrivals: 10
+Verbose logging: True
+------------------------------------------------------------
+t=0.0363 ARRIVAL 0001 SERVICE=7.9402
+t=0.0363 Jobs in system: 1 -> ['J1(7.9402)']
+t=0.0363 AFTER_ARRIVAL - Completion times:
+t=0.0363   J0001: remaining=7.9402, completion_time=7.9765 (in 7.9402 time units)
+t=0.0363 SCHEDULE: J1 will complete in 7.9402 (remaining=7.9402, n=1)
+
+t=0.1381 UPDATE: dt=0.1018, n=1, service_per_job=0.1018
+t=0.1381   J1: 7.9402 -> 7.8383
+t=0.1381 ARRIVAL 0002 SERVICE=0.0753
+t=0.1381 Jobs in system: 2 -> ['J1(7.8383)', 'J2(0.0753)']
+t=0.1381 AFTER_ARRIVAL - Completion times:
+t=0.1381   J0002: remaining=0.0753, completion_time=0.2888 (in 0.1506 time units)
+t=0.1381   J0001: remaining=7.8383, completion_time=15.8148 (in 15.6767 time units)
+t=0.1381 SCHEDULE: J2 will complete in 0.1506 (remaining=0.0753, n=2)
+t=0.1381 COMPLETION interrupted
+
+t=0.1513 UPDATE: dt=0.0131, n=2, service_per_job=0.0066
+t=0.1513   J1: 7.8383 -> 7.8318
+t=0.1513   J2: 0.0753 -> 0.0688
+t=0.1513 ARRIVAL 0003 SERVICE=0.0140
+t=0.1513 Jobs in system: 3 -> ['J1(7.8318)', 'J2(0.0688)', 'J3(0.0140)']
+t=0.1513 AFTER_ARRIVAL - Completion times:
+t=0.1513   J0003: remaining=0.0140, completion_time=0.1932 (in 0.0420 time units)
+t=0.1513   J0002: remaining=0.0688, completion_time=0.3575 (in 0.2063 time units)
+t=0.1513   J0001: remaining=7.8318, completion_time=23.6466 (in 23.4953 time units)
+t=0.1513 SCHEDULE: J3 will complete in 0.0420 (remaining=0.0140, n=3)
+t=0.1513 COMPLETION interrupted
+
+t=0.1559 UPDATE: dt=0.0046, n=3, service_per_job=0.0015
+t=0.1559   J1: 7.8318 -> 7.8302
+t=0.1559   J2: 0.0688 -> 0.0672
+t=0.1559   J3: 0.0140 -> 0.0124
+t=0.1559 ARRIVAL 0004 SERVICE=0.1659
+t=0.1559 Jobs in system: 4 -> ['J1(7.8302)', 'J2(0.0672)', 'J3(0.0124)', 'J4(0.1659)']
+t=0.1559 AFTER_ARRIVAL - Completion times:
+t=0.1559   J0003: remaining=0.0124, completion_time=0.2057 (in 0.0498 time units)
+t=0.1559   J0002: remaining=0.0672, completion_time=0.4248 (in 0.2689 time units)
+t=0.1559   J0004: remaining=0.1659, completion_time=0.8196 (in 0.6637 time units)
+t=0.1559   J0001: remaining=7.8302, completion_time=31.4768 (in 31.3209 time units)
+t=0.1559 SCHEDULE: J3 will complete in 0.0498 (remaining=0.0124, n=4)
+t=0.1559 COMPLETION interrupted
+
+t=0.2057 UPDATE: dt=0.0498, n=4, service_per_job=0.0124
+t=0.2057   J1: 7.8302 -> 7.8178
+t=0.2057   J2: 0.0672 -> 0.0548
+t=0.2057   J3: 0.0124 -> 0.0000
+t=0.2057   J4: 0.1659 -> 0.1535
+t=0.2057 COMPLETE J3 RESPONSE_TIME=0.0544
+t=0.2057 Jobs remaining: 3 -> ['J1(7.8178)', 'J2(0.0548)', 'J4(0.1535)']
+t=0.2057 AFTER_COMPLETION - Completion times:
+t=0.2057   J0002: remaining=0.0548, completion_time=0.3700 (in 0.1643 time units)
+t=0.2057   J0004: remaining=0.1535, completion_time=0.6661 (in 0.4604 time units)
+t=0.2057   J0001: remaining=7.8178, completion_time=23.6590 (in 23.4533 time units)
+t=0.2057 SCHEDULE: J2 will complete in 0.1643 (remaining=0.0548, n=3)
+
+t=0.2270 UPDATE: dt=0.0213, n=3, service_per_job=0.0071
+t=0.2270   J1: 7.8178 -> 7.8107
+t=0.2270   J2: 0.0548 -> 0.0477
+t=0.2270   J4: 0.1535 -> 0.1464
+t=0.2270 ARRIVAL 0005 SERVICE=3.2478
+t=0.2270 Jobs in system: 4 -> ['J1(7.8107)', 'J2(0.0477)', 'J4(0.1464)', 'J5(3.2478)']
+t=0.2270 AFTER_ARRIVAL - Completion times:
+t=0.2270   J0002: remaining=0.0477, completion_time=0.4177 (in 0.1907 time units)
+t=0.2270   J0004: remaining=0.1464, completion_time=0.8125 (in 0.5855 time units)
+t=0.2270   J0005: remaining=3.2478, completion_time=13.2183 (in 12.9913 time units)
+t=0.2270   J0001: remaining=7.8107, completion_time=31.4697 (in 31.2427 time units)
+t=0.2270 SCHEDULE: J2 will complete in 0.1907 (remaining=0.0477, n=4)
+t=0.2270 COMPLETION interrupted
+
+t=0.2286 UPDATE: dt=0.0016, n=4, service_per_job=0.0004
+t=0.2286   J1: 7.8107 -> 7.8103
+t=0.2286   J2: 0.0477 -> 0.0473
+t=0.2286   J4: 0.1464 -> 0.1460
+t=0.2286   J5: 3.2478 -> 3.2474
+t=0.2286 ARRIVAL 0006 SERVICE=0.2891
+t=0.2286 Jobs in system: 5 -> ['J1(7.8103)', 'J2(0.0473)', 'J4(0.1460)', 'J5(3.2474)', 'J6(0.2891)']
+t=0.2286 AFTER_ARRIVAL - Completion times:
+t=0.2286   J0002: remaining=0.0473, completion_time=0.4649 (in 0.2363 time units)
+t=0.2286   J0004: remaining=0.1460, completion_time=0.9585 (in 0.7299 time units)
+t=0.2286   J0006: remaining=0.2891, completion_time=1.6739 (in 1.4453 time units)
+t=0.2286   J0005: remaining=3.2474, completion_time=16.4657 (in 16.2371 time units)
+t=0.2286   J0001: remaining=7.8103, completion_time=39.2800 (in 39.0514 time units)
+t=0.2286 SCHEDULE: J2 will complete in 0.2363 (remaining=0.0473, n=5)
+t=0.2286 COMPLETION interrupted
+
+t=0.4649 UPDATE: dt=0.2363, n=5, service_per_job=0.0473
+t=0.4649   J1: 7.8103 -> 7.7630
+t=0.4649   J2: 0.0473 -> 0.0000
+t=0.4649   J4: 0.1460 -> 0.0987
+t=0.4649   J5: 3.2474 -> 3.2002
+t=0.4649   J6: 0.2891 -> 0.2418
+t=0.4649 COMPLETE J2 RESPONSE_TIME=0.3268
+t=0.4649 Jobs remaining: 4 -> ['J1(7.7630)', 'J4(0.0987)', 'J5(3.2002)', 'J6(0.2418)']
+t=0.4649 AFTER_COMPLETION - Completion times:
+t=0.4649   J0004: remaining=0.0987, completion_time=0.8598 (in 0.3949 time units)
+t=0.4649   J0006: remaining=0.2418, completion_time=1.4321 (in 0.9671 time units)
+t=0.4649   J0005: remaining=3.2002, completion_time=13.2655 (in 12.8006 time units)
+t=0.4649   J0001: remaining=7.7630, completion_time=31.5170 (in 31.0520 time units)
+t=0.4649 SCHEDULE: J4 will complete in 0.3949 (remaining=0.0987, n=4)
+
+t=0.8598 UPDATE: dt=0.3949, n=4, service_per_job=0.0987
+t=0.8598   J1: 7.7630 -> 7.6643
+t=0.8598   J4: 0.0987 -> 0.0000
+t=0.8598   J5: 3.2002 -> 3.1014
+t=0.8598   J6: 0.2418 -> 0.1431
+t=0.8598 COMPLETE J4 RESPONSE_TIME=0.7039
+t=0.8598 Jobs remaining: 3 -> ['J1(7.6643)', 'J5(3.1014)', 'J6(0.1431)']
+t=0.8598 AFTER_COMPLETION - Completion times:
+t=0.8598   J0006: remaining=0.1431, completion_time=1.2890 (in 0.4292 time units)
+t=0.8598   J0005: remaining=3.1014, completion_time=10.1641 (in 9.3043 time units)
+t=0.8598   J0001: remaining=7.6643, completion_time=23.8527 (in 22.9929 time units)
+t=0.8598 SCHEDULE: J6 will complete in 0.4292 (remaining=0.1431, n=3)
+
+t=1.2890 UPDATE: dt=0.4292, n=3, service_per_job=0.1431
+t=1.2890   J1: 7.6643 -> 7.5212
+t=1.2890   J5: 3.1014 -> 2.9584
+t=1.2890   J6: 0.1431 -> 0.0000
+t=1.2890 COMPLETE J6 RESPONSE_TIME=1.0604
+t=1.2890 Jobs remaining: 2 -> ['J1(7.5212)', 'J5(2.9584)']
+t=1.2890 AFTER_COMPLETION - Completion times:
+t=1.2890   J0005: remaining=2.9584, completion_time=7.2057 (in 5.9167 time units)
+t=1.2890   J0001: remaining=7.5212, completion_time=16.3315 (in 15.0425 time units)
+t=1.2890 SCHEDULE: J5 will complete in 5.9167 (remaining=2.9584, n=2)
+
+t=4.6461 UPDATE: dt=3.3571, n=2, service_per_job=1.6785
+t=4.6461   J1: 7.5212 -> 5.8427
+t=4.6461   J5: 2.9584 -> 1.2798
+t=4.6461 ARRIVAL 0007 SERVICE=0.0197
+t=4.6461 Jobs in system: 3 -> ['J1(5.8427)', 'J5(1.2798)', 'J7(0.0197)']
+t=4.6461 AFTER_ARRIVAL - Completion times:
+t=4.6461   J0007: remaining=0.0197, completion_time=4.7051 (in 0.0591 time units)
+t=4.6461   J0005: remaining=1.2798, completion_time=8.4856 (in 3.8395 time units)
+t=4.6461   J0001: remaining=5.8427, completion_time=22.1742 (in 17.5281 time units)
+t=4.6461 SCHEDULE: J7 will complete in 0.0591 (remaining=0.0197, n=3)
+t=4.6461 COMPLETION interrupted
+
+t=4.6616 UPDATE: dt=0.0155, n=3, service_per_job=0.0052
+t=4.6616   J1: 5.8427 -> 5.8375
+t=4.6616   J5: 1.2798 -> 1.2747
+t=4.6616   J7: 0.0197 -> 0.0145
+t=4.6616 ARRIVAL 0008 SERVICE=0.0167
+t=4.6616 Jobs in system: 4 -> ['J1(5.8375)', 'J5(1.2747)', 'J7(0.0145)', 'J8(0.0167)']
+t=4.6616 AFTER_ARRIVAL - Completion times:
+t=4.6616   J0007: remaining=0.0145, completion_time=4.7197 (in 0.0581 time units)
+t=4.6616   J0008: remaining=0.0167, completion_time=4.7285 (in 0.0669 time units)
+t=4.6616   J0005: remaining=1.2747, completion_time=9.7602 (in 5.0986 time units)
+t=4.6616   J0001: remaining=5.8375, completion_time=28.0117 (in 23.3501 time units)
+t=4.6616 SCHEDULE: J7 will complete in 0.0581 (remaining=0.0145, n=4)
+t=4.6616 COMPLETION interrupted
+
+t=4.6896 UPDATE: dt=0.0281, n=4, service_per_job=0.0070
+t=4.6896   J1: 5.8375 -> 5.8305
+t=4.6896   J5: 1.2747 -> 1.2676
+t=4.6896   J7: 0.0145 -> 0.0075
+t=4.6896   J8: 0.0167 -> 0.0097
+t=4.6896 ARRIVAL 0009 SERVICE=0.0614
+t=4.6896 Jobs in system: 5 -> ['J1(5.8305)', 'J5(1.2676)', 'J7(0.0075)', 'J8(0.0097)', 'J9(0.0614)']
+t=4.6896 AFTER_ARRIVAL - Completion times:
+t=4.6896   J0007: remaining=0.0075, completion_time=4.7272 (in 0.0375 time units)
+t=4.6896   J0008: remaining=0.0097, completion_time=4.7382 (in 0.0485 time units)
+t=4.6896   J0009: remaining=0.0614, completion_time=4.9965 (in 0.3069 time units)
+t=4.6896   J0005: remaining=1.2676, completion_time=11.0279 (in 6.3382 time units)
+t=4.6896   J0001: remaining=5.8305, completion_time=33.8422 (in 29.1525 time units)
+t=4.6896 SCHEDULE: J7 will complete in 0.0375 (remaining=0.0075, n=5)
+t=4.6896 COMPLETION interrupted
+
+t=4.7272 UPDATE: dt=0.0375, n=5, service_per_job=0.0075
+t=4.7272   J1: 5.8305 -> 5.8230
+t=4.7272   J5: 1.2676 -> 1.2601
+t=4.7272   J7: 0.0075 -> 0.0000
+t=4.7272   J8: 0.0097 -> 0.0022
+t=4.7272   J9: 0.0614 -> 0.0539
+t=4.7272 COMPLETE J7 RESPONSE_TIME=0.0811
+t=4.7272 Jobs remaining: 4 -> ['J1(5.8230)', 'J5(1.2601)', 'J8(0.0022)', 'J9(0.0539)']
+t=4.7272 AFTER_COMPLETION - Completion times:
+t=4.7272   J0008: remaining=0.0022, completion_time=4.7360 (in 0.0088 time units)
+t=4.7272   J0009: remaining=0.0539, completion_time=4.9427 (in 0.2155 time units)
+t=4.7272   J0005: remaining=1.2601, completion_time=9.7677 (in 5.0406 time units)
+t=4.7272   J0001: remaining=5.8230, completion_time=28.0192 (in 23.2920 time units)
+t=4.7272 SCHEDULE: J8 will complete in 0.0088 (remaining=0.0022, n=4)
+t=4.7334 UPDATE: dt=0.0062, n=4, service_per_job=0.0016
+
+t=4.7334   J1: 5.8230 -> 5.8214
+t=4.7334   J5: 1.2601 -> 1.2586
+t=4.7334   J8: 0.0022 -> 0.0006
+t=4.7334   J9: 0.0539 -> 0.0523
+t=4.7334 ARRIVAL 0010 SERVICE=0.9080
+t=4.7334 Jobs in system: 5 -> ['J1(5.8214)', 'J5(1.2586)', 'J8(0.0006)', 'J9(0.0523)', 'J10(0.9080)']
+t=4.7334 AFTER_ARRIVAL - Completion times:
+t=4.7334   J0008: remaining=0.0006, completion_time=4.7366 (in 0.0032 time units)
+t=4.7334   J0009: remaining=0.0523, completion_time=4.9950 (in 0.2616 time units)
+t=4.7334   J0010: remaining=0.9080, completion_time=9.2734 (in 4.5400 time units)
+t=4.7334   J0005: remaining=1.2586, completion_time=11.0263 (in 6.2929 time units)
+t=4.7334   J0001: remaining=5.8214, completion_time=33.8406 (in 29.1072 time units)
+t=4.7334 SCHEDULE: J8 will complete in 0.0032 (remaining=0.0006, n=5)
+t=4.7334 COMPLETION interrupted
+
+t=4.7366 UPDATE: dt=0.0032, n=5, service_per_job=0.0006
+t=4.7366   J1: 5.8214 -> 5.8208
+t=4.7366   J5: 1.2586 -> 1.2579
+t=4.7366   J8: 0.0006 -> 0.0000
+t=4.7366   J9: 0.0523 -> 0.0517
+t=4.7366   J10: 0.9080 -> 0.9074
+t=4.7366 COMPLETE J8 RESPONSE_TIME=0.0750
+t=4.7366 Jobs remaining: 4 -> ['J1(5.8208)', 'J5(1.2579)', 'J9(0.0517)', 'J10(0.9074)']
+t=4.7366 AFTER_COMPLETION - Completion times:
+t=4.7366   J0009: remaining=0.0517, completion_time=4.9433 (in 0.2067 time units)
+t=4.7366   J0010: remaining=0.9074, completion_time=8.3660 (in 3.6294 time units)
+t=4.7366   J0005: remaining=1.2579, completion_time=9.7684 (in 5.0318 time units)
+t=4.7366   J0001: remaining=5.8208, completion_time=28.0198 (in 23.2832 time units)
+t=4.7366 SCHEDULE: J9 will complete in 0.2067 (remaining=0.0517, n=4)
+
+t=4.9433 UPDATE: dt=0.2067, n=4, service_per_job=0.0517
+t=4.9433   J1: 5.8208 -> 5.7691
+t=4.9433   J5: 1.2579 -> 1.2063
+t=4.9433   J9: 0.0517 -> 0.0000
+t=4.9433   J10: 0.9074 -> 0.8557
+t=4.9433 COMPLETE J9 RESPONSE_TIME=0.2537
+t=4.9433 Jobs remaining: 3 -> ['J1(5.7691)', 'J5(1.2063)', 'J10(0.8557)']
+t=4.9433 AFTER_COMPLETION - Completion times:
+t=4.9433   J0010: remaining=0.8557, completion_time=7.5103 (in 2.5671 time units)
+t=4.9433   J0005: remaining=1.2063, completion_time=8.5621 (in 3.6188 time units)
+t=4.9433   J0001: remaining=5.7691, completion_time=22.2507 (in 17.3074 time units)
+t=4.9433 SCHEDULE: J10 will complete in 2.5671 (remaining=0.8557, n=3)
+
+t=7.5103 UPDATE: dt=2.5671, n=3, service_per_job=0.8557
+t=7.5103   J1: 5.7691 -> 4.9134
+t=7.5103   J5: 1.2063 -> 0.3506
+t=7.5103   J10: 0.8557 -> 0.0000
+t=7.5103 COMPLETE J10 RESPONSE_TIME=2.7770
+t=7.5103 Jobs remaining: 2 -> ['J1(4.9134)', 'J5(0.3506)']
+t=7.5103 AFTER_COMPLETION - Completion times:
+t=7.5103   J0005: remaining=0.3506, completion_time=8.2115 (in 0.7012 time units)
+t=7.5103   J0001: remaining=4.9134, completion_time=17.3372 (in 9.8269 time units)
+t=7.5103 SCHEDULE: J5 will complete in 0.7012 (remaining=0.3506, n=2)
+
+t=8.2115 UPDATE: dt=0.7012, n=2, service_per_job=0.3506
+t=8.2115   J1: 4.9134 -> 4.5629
+t=8.2115   J5: 0.3506 -> 0.0000
+t=8.2115 COMPLETE J5 RESPONSE_TIME=7.9845
+t=8.2115 Jobs remaining: 1 -> ['J1(4.5629)']
+t=8.2115 AFTER_COMPLETION - Completion times:
+t=8.2115   J0001: remaining=4.5629, completion_time=12.7744 (in 4.5629 time units)
+t=8.2115 SCHEDULE: J1 will complete in 4.5629 (remaining=4.5629, n=1)
+
+t=12.7744 UPDATE: dt=4.5629, n=1, service_per_job=4.5629
+t=12.7744   J1: 4.5629 -> 0.0000
+t=12.7744 COMPLETE J1 RESPONSE_TIME=12.7381
+t=12.7744 Jobs remaining: 0 -> []
+t=12.7744 AFTER_COMPLETION - No jobs in system
