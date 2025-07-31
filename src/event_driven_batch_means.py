@@ -1,6 +1,8 @@
 import simpy
 import numpy as np
-import random
+#import random
+
+from library.rngs import random
 
 # Parameters
 SI_MAX = 20
@@ -15,7 +17,7 @@ CONF_LEVEL = 2.576
 N_ARRIVALS = 68561
 
 def hyperexp(p, l1, l2):
-    return np.random.exponential(1/l1) if random.random() < p else np.random.exponential(1/l2)
+    return np.random.exponential(1/l1) if random() < p else np.random.exponential(1/l2)
 
 class Job:
     def __init__(self, arrival_time, service_time):
@@ -245,4 +247,4 @@ def run_sim():
 
 if __name__ == "__main__":
     run_sim()
-    batch_means(num_batches=512)  # puoi aumentare per maggiore accuratezza
+    batch_means(num_batches=512)  
