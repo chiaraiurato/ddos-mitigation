@@ -1,4 +1,4 @@
-#!/home/alessandro/Documenti/GitHub/ddos-mitigation/.venv/bin/python3
+#!/home/ale/Documenti/GitHub/ddos-mitigation/.venv/bin/python3
 # -*- coding: utf-8 -*-
 import re
 import sys
