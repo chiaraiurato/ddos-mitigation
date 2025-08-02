@@ -36,7 +36,7 @@
  # 
  #--------------------------------------------------------------------------
 
-from rngs import random
+from library.rngs import random
 from math import log,sqrt,exp
 
 def Bernoulli(p):
@@ -123,6 +123,19 @@ def Exponential(m):
   #=========================================================
   #
   return (-m * log(1.0 - random()))
+
+def Hyperexponential(p, l1, l2):
+  # ====================================================================
+  # Returns a hyperexponential distributed positive real number.
+  # NOTE: 0.0 < p < 1.0, l1 > 0.0, l2 > 0.0
+  # It returns an exponential with rate l1 with probability p,
+  # otherwise with rate l2 with probability (1 - p)
+  # ====================================================================
+  #
+  if (random() < p):
+    return Exponential(1.0 / l1)
+  else:
+    return Exponential(1.0 / l2)
 
 def Erlang(n,b):
   #================================================== 

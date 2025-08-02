@@ -1,6 +1,6 @@
 import simpy
 import numpy as np
-import random
+from library.rvgs import Hyperexponential
 
 # Parameters for verification
 ARRIVAL_P = 0.03033
@@ -11,10 +11,6 @@ SERVICE_L1 = 0.3791
 SERVICE_L2 = 12.1208
 N_ARRIVALS = 10  # Fixed number of arrivals for testing
 VERBOSE = True   # Enable detailed logging
-
-def hyperexp(p, l1, l2):
-    """Generate hyperexponential random variable"""
-    return np.random.exponential(1/l1) if random.random() < p else np.random.exponential(1/l2)
 
 class Job:
     def __init__(self, job_id, arrival_time, service_time):
@@ -88,7 +84,7 @@ class SingleServerPS:
         """Generate arrivals until N_ARRIVALS is reached"""
         while self.total_arrivals < N_ARRIVALS:
             # Wait for next arrival
-            interarrival_time = hyperexp(ARRIVAL_P, ARRIVAL_L1, ARRIVAL_L2)
+            interarrival_time = Hyperexponential(ARRIVAL_P, ARRIVAL_L1, ARRIVAL_L2)
             yield self.env.timeout(interarrival_time)
             
             now = self.env.now
@@ -96,7 +92,7 @@ class SingleServerPS:
             
             # Create new job
             self.total_arrivals += 1
-            service_time = hyperexp(SERVICE_P, SERVICE_L1, SERVICE_L2)
+            service_time = Hyperexponential(SERVICE_P, SERVICE_L1, SERVICE_L2)
             job = Job(self.total_arrivals, now, service_time)
             
             self.log(f"ARRIVAL {job.id:04d} SERVICE={service_time:.4f}")
@@ -232,10 +228,7 @@ class SingleServerPS:
 
 def run_simulation():
     """Run a single simulation"""
-    # Set random seed for reproducibility
-    random.seed(42)
-    np.random.seed(42)
-    
+    # Set random seed for reproducibility    
     print("Starting Processor Sharing Simulation")
     print(f"Number of arrivals: {N_ARRIVALS}")
     print(f"Verbose logging: {VERBOSE}")
