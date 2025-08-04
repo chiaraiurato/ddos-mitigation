@@ -13,7 +13,9 @@ MITIGATION_MEAN = 0.001
 P_FEEDBACK = 0.02
 P_FALSE_POSITIVE = 0.01  # 1% false positive rate
 MAX_WEB_CAPACITY = 20
-N_ARRIVALS = 1000
+MAX_SPIKE_CAPACITY = 20
+SCALE_THRESHOLD = 20
+N_ARRIVALS = 360000
 P_LECITO = 0.1  # 10% delle richieste sono lecite
 
 class Job:
@@ -102,7 +104,7 @@ class DDoSSystem:
     def __init__(self, env):
         self.env = env
         self.web_server = ProcessorSharingServer(env, "Web")
-        self.spike_server = ProcessorSharingServer(env, "Spike")
+        self.spike_servers = [ProcessorSharingServer(env, "Spike-0")]
         self.mitigation_completions = 0
         self.total_arrivals = 0
         self.false_positives = 0
@@ -153,7 +155,18 @@ class DDoSSystem:
             if len(self.web_server.jobs) < MAX_WEB_CAPACITY:
                 self.web_server.arrival(job)
             else:
-                self.spike_server.arrival(job)
+                # Find spike server with capacity
+                assigned = False
+                for server in self.spike_servers:
+                    if len(server.jobs) < MAX_SPIKE_CAPACITY:
+                        server.arrival(job)
+                        assigned = True
+                        break
+                if not assigned:
+                    new_id = len(self.spike_servers)
+                    new_server = ProcessorSharingServer(self.env, f"Spike-{new_id}")
+                    self.spike_servers.append(new_server)
+                    new_server.arrival(job)
 
     def report(self):
         now = self.env.now
@@ -178,7 +191,8 @@ class DDoSSystem:
                 print(f"{name} Completions: 0")
 
         stats("Web", self.web_server)
-        stats("Spike", self.spike_server)
+        for i, server in enumerate(self.spike_servers):
+            stats(f"Spike-{i}", server)
 
 def run_sim():
     env = simpy.Environment()
