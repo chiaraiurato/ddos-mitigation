@@ -126,10 +126,10 @@ class DDoSSystem:
             job.original_service = service_time
             job.last_updated = now
 
-            if len(self.web_server.jobs) >= MAX_WEB_CAPACITY:
-                self.spike_server.arrival(job)
-            else:
+            if len(self.web_server.jobs) < MAX_WEB_CAPACITY:
                 self.web_server.arrival(job)
+            else:
+                self.spike_server.arrival(job)
 
     def report(self):
         now = self.env.now
