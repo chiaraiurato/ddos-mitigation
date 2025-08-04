@@ -375,8 +375,6 @@ def run_correct_simulation():
     return system
 
 if __name__ == "__main__":
-    print("CORRECT SYSTEM ARCHITECTURE")
-    print("=" * 50)
     print("Flow: All Requests → Mitigation → Web/Spike")
     print(f"Mitigation Capacity: {MITIGATION_CAPACITY}")
     print(f"Web Server Capacity: {WEB_SERVER_CAPACITY}")
