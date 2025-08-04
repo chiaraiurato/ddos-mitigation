@@ -11,16 +11,19 @@ SERVICE_L1 = 0.3791
 SERVICE_L2 = 12.1208
 MITIGATION_MEAN = 0.001
 P_FEEDBACK = 0.02
+P_FALSE_POSITIVE = 0.01  # 1% false positive rate
 MAX_WEB_CAPACITY = 20
 N_ARRIVALS = 1000
+P_LECITO = 0.1  # 10% delle richieste sono lecite
 
 class Job:
-    def __init__(self, job_id, arrival_time, service_time):
+    def __init__(self, job_id, arrival_time, service_time, is_legal):
         self.id = job_id
         self.arrival = arrival_time
         self.remaining = service_time
         self.original_service = service_time
         self.last_updated = arrival_time
+        self.is_legal = is_legal
 
 class ProcessorSharingServer:
     def __init__(self, env, name):
@@ -30,6 +33,8 @@ class ProcessorSharingServer:
         self.proc = None
         self.completed_jobs = []
         self.total_completions = 0
+        self.legal_completions = 0
+        self.illegal_completions = 0
         self.last_time = 0.0
         self.area = 0.0
         self.busy_time = 0.0
@@ -82,6 +87,10 @@ class ProcessorSharingServer:
             response_time = now - job.arrival
             self.completed_jobs.append(response_time)
             self.total_completions += 1
+            if job.is_legal:
+                self.legal_completions += 1
+            else:
+                self.illegal_completions += 1
             if self.jobs:
                 self.env.process(self.schedule_next_completion())
 
@@ -96,6 +105,10 @@ class DDoSSystem:
         self.spike_server = ProcessorSharingServer(env, "Spike")
         self.mitigation_completions = 0
         self.total_arrivals = 0
+        self.false_positives = 0
+        self.legal_arrivals = 0
+        self.illegal_arrivals = 0
+        self.false_positives_legal = 0
         self.env.process(self.arrival_process())
 
     def arrival_process(self):
@@ -105,7 +118,12 @@ class DDoSSystem:
 
             self.total_arrivals += 1
             arrival_time = self.env.now
-            job = Job(self.total_arrivals, arrival_time, None)
+            is_legal = np.random.rand() < P_LECITO
+            if is_legal:
+                self.legal_arrivals += 1
+            else:
+                self.illegal_arrivals += 1
+            job = Job(self.total_arrivals, arrival_time, None, is_legal)
             self.env.process(self.mitigation_process(job))
 
     def mitigation_process(self, job):
@@ -116,6 +134,12 @@ class DDoSSystem:
 
         now = self.env.now
         self.mitigation_completions += 1
+
+        if np.random.rand() < P_FALSE_POSITIVE:
+            self.false_positives += 1
+            if job.is_legal:
+                self.false_positives_legal += 1
+            return
 
         if np.random.rand() < P_FEEDBACK:
             job.arrival = now
@@ -136,12 +160,17 @@ class DDoSSystem:
         print("\n==== SIMULATION COMPLETE ====")
         print(f"Total time: {now:.4f}")
         print(f"Arrivals: {self.total_arrivals}")
+        print(f"Lecite: {self.legal_arrivals}, Illecite: {self.illegal_arrivals}")
         print(f"Mitigation completions: {self.mitigation_completions}")
+        print(f"False positives (dropped): {self.false_positives}")
+        print(f"  Di cui lecite: {self.false_positives_legal}")
 
         def stats(name, server):
             if server.completed_jobs:
                 avg_rt = np.mean(server.completed_jobs)
                 print(f"{name} Completions: {server.total_completions}")
+                print(f"  Lecite  : {server.legal_completions}")
+                print(f"  Illecite: {server.illegal_completions}")
                 print(f"{name} Avg Resp Time: {avg_rt:.4f}")
                 print(f"{name} Utilization: {server.busy_time / now:.4f}")
                 print(f"{name} Throughput: {server.total_completions / now:.4f}")
