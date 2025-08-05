@@ -1,6 +1,6 @@
 import simpy
 import numpy as np
-from library.rvgs import Hyperexponential, Exponential
+from library.rvgs import Hyperexponential
 from library.rngs import random
 
 from engineering.costants import *
