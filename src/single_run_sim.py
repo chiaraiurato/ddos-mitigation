@@ -1,10 +1,10 @@
 import numpy as np
 import simpy
 from library.rngs import random
-from src.costants import *
+from engineering.costants import *
 from library.rngs import random
 from library.rvgs import Exponential, Hyperexponential
-from src.job import Job
+from model.job import Job
 
 class MitigationCenter:
     def __init__(self, arrival_time, service_time):
