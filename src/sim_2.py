@@ -1,6 +1,7 @@
 import simpy
 import numpy as np
-from library.rvgs import Hyperexponential
+from library.rvgs import Hyperexponential, Exponential
+from library.rngs import random
 
 # Parameters
 ARRIVAL_P = 0.03033
@@ -15,7 +16,7 @@ P_FALSE_POSITIVE = 0.01  # 1% false positive rate
 MAX_WEB_CAPACITY = 20
 MAX_SPIKE_CAPACITY = 20
 SCALE_THRESHOLD = 20
-N_ARRIVALS = 360000
+N_ARRIVALS = 5000000
 P_LECITO = 0.1  # 10% delle richieste sono lecite
 
 class Job:
@@ -120,7 +121,7 @@ class DDoSSystem:
 
             self.total_arrivals += 1
             arrival_time = self.env.now
-            is_legal = np.random.rand() < P_LECITO
+            is_legal = random() < P_LECITO
             if is_legal:
                 self.legal_arrivals += 1
             else:
@@ -130,20 +131,20 @@ class DDoSSystem:
 
     def mitigation_process(self, job):
         try:
-            yield self.env.timeout(np.random.exponential(MITIGATION_MEAN))
+            yield self.env.timeout(Exponential(MITIGATION_MEAN))
         except simpy.Interrupt:
             return
 
         now = self.env.now
         self.mitigation_completions += 1
 
-        if np.random.rand() < P_FALSE_POSITIVE:
+        if random() < P_FALSE_POSITIVE:
             self.false_positives += 1
             if job.is_legal:
                 self.false_positives_legal += 1
             return
 
-        if np.random.rand() < P_FEEDBACK:
+        if random() < P_FEEDBACK:
             job.arrival = now
             self.env.process(self.mitigation_process(job))
         else:
