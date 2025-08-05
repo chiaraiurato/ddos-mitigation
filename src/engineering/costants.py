@@ -24,22 +24,22 @@
 # FAST_BATCH_SIZE = 512        
 # FAST_NUM_BATCHES = 256    
 
-# Paramtri in sim2
-
-# Parameters (based on literature data)
-# Source: https://www.researchgate.net/figure/Average-waiting-time-of-requests-in-complex-DDoS-scenarios-with-or-without-the-DDoS_fig4_335954299
-ARRIVAL_P = 0.03
+# Parameters 
+# Source: Performance Engineering - Learning Through Applications Using JMT 
+ARRIVAL_P = 0.03033
 ARRIVAL_L1 = 0.4044
 ARRIVAL_L2 = 12.9289
 
-# Source: Hyperexponential values from original model
 SERVICE_P = 0.03033
 SERVICE_L1 = 0.3791
 SERVICE_L2 = 12.1208
 
 # Source: Typical mitigation time: ~1ms (Cloudflare)
-# Source: https://www.cloudflare.com/ddos/ddos-mitigation/?utm_source=chatgpt.com
-MITIGATION_MEAN = 0.001
+# Source: https://www.cisco.com/c/en/us/td/docs/security/secure-firewall/management-center/device-config/720/management-center-device-config-72/intrusion-performance.html
+MITIGATION_MEAN = 0.0011
+# Buffer capacity for M/M/1/K model
+# Typical enterprise firewall buffer sizes
+MITIGATION_CAPACITY = 2000
 
 # False positive rate in literature: 0.01–0.03
 # Source: https://www.researchgate.net/publication/335954299

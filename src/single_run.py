@@ -14,7 +14,7 @@ class DDoSSystem:
         self.web_server = ProcessorSharingServer(env, "Web")
         self.spike_servers = [ProcessorSharingServer(env, "Spike-0")]
 
-        # Metriche centralizzate
+        
         self.metrics = {
             "mitigation_completions": 0,
             "total_arrivals": 0,
@@ -70,8 +70,11 @@ class DDoSSystem:
         stats("Web", self.web_server)
         for i, server in enumerate(self.spike_servers):
             stats(f"Spike-{i}", server)
+        print(f"Mitigation Discarded : {self.metrics.get('discarded_mitigation', 0)}")
+        print("==== END OF REPORT ====")
 
 def run_sim():
+    print("Starting DDoS Mitigation Simulation...")
     env = simpy.Environment()
     system = DDoSSystem(env)
     env.run()
