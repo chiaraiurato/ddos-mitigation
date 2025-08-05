@@ -3,21 +3,32 @@ import numpy as np
 from library.rvgs import Hyperexponential, Exponential
 from library.rngs import random
 
-# Parameters
-ARRIVAL_P = 0.03033
+# Parameters (based on literature data)
+# Source: https://www.researchgate.net/figure/Average-waiting-time-of-requests-in-complex-DDoS-scenarios-with-or-without-the-DDoS_fig4_335954299
+ARRIVAL_P = 0.03
 ARRIVAL_L1 = 0.4044
 ARRIVAL_L2 = 12.9289
+
+# Source: Hyperexponential values from original model
 SERVICE_P = 0.03033
 SERVICE_L1 = 0.3791
 SERVICE_L2 = 12.1208
+
+# Source: Typical mitigation time: ~1ms (Cloudflare)
+# Source: https://www.cloudflare.com/ddos/ddos-mitigation/?utm_source=chatgpt.com
 MITIGATION_MEAN = 0.001
+
+# False positive rate in literature: 0.01–0.03
+# Source: https://www.researchgate.net/publication/335954299
 P_FEEDBACK = 0.02
-P_FALSE_POSITIVE = 0.01  # 1% false positive rate
+P_FALSE_POSITIVE = 0.01
+P_LECITO = 0.1
+
+# Server configuration
 MAX_WEB_CAPACITY = 20
 MAX_SPIKE_CAPACITY = 20
 SCALE_THRESHOLD = 20
 N_ARRIVALS = 5000000
-P_LECITO = 0.1  # 10% delle richieste sono lecite
 
 class Job:
     def __init__(self, job_id, arrival_time, service_time, is_legal):
