@@ -54,6 +54,9 @@ class DDoSSystem:
         print(f"Mitigation completions: {self.metrics['mitigation_completions']}")
         print(f"False positives (dropped): {self.metrics['false_positives']}")
         print(f"  Di cui lecite: {self.metrics['false_positives_legal']}")
+        
+        discarded = self.metrics.get("discarded_detail", [])
+        print(f"Total discarded jobs: {len(discarded)}")
 
         def stats(name, server):
             if server.completed_jobs:
@@ -61,9 +64,9 @@ class DDoSSystem:
                 print(f"{name} Completions: {server.total_completions}")
                 print(f"  Lecite  : {server.legal_completions}")
                 print(f"  Illecite: {server.illegal_completions}")
-                print(f"{name} Avg Resp Time: {avg_rt:.4f}")
-                print(f"{name} Utilization: {server.busy_time / now:.4f}")
-                print(f"{name} Throughput: {server.total_completions / now:.4f}")
+                print(f"{name} Avg Resp Time: {avg_rt:.6f}")
+                print(f"{name} Utilization: {server.busy_time / now:.6f}")
+                print(f"{name} Throughput: {server.total_completions / now:.6f}")
             else:
                 print(f"{name} Completions: 0")
 
@@ -71,6 +74,33 @@ class DDoSSystem:
         for i, server in enumerate(self.spike_servers):
             stats(f"Spike-{i}", server)
         print(f"Mitigation Discarded : {self.metrics.get('discarded_mitigation', 0)}")
+        
+        # === Global percentages summary ===
+        print("\n==== GLOBAL STATS ====")
+        total = self.metrics["total_arrivals"]
+        discarded_total = len(self.metrics.get("discarded_detail", []))
+        processed_legal = self.metrics.get("processed_legal", 0)
+        processed_illegal = self.metrics.get("processed_illegal", 0)
+
+        false_positive = self.metrics.get("false_positives", 0)
+        false_positive_legal = self.metrics.get("false_positives_legal", 0)
+
+        discarded_legal = sum(1 for d in self.metrics.get("discarded_detail", []) if d["is_legal"])
+        discarded_illegal = discarded_total - discarded_legal
+
+        def percent(x): return 100.0 * x / total if total > 0 else 0.0
+
+        print(f"Processed legal  : {processed_legal} ({percent(processed_legal):.2f}%)")
+        print(f"Processed illegal: {processed_illegal} ({percent(processed_illegal):.2f}%)")
+
+        # Richieste droppate per la coda piena
+        #print(f"Discarded legal  : {discarded_legal} ({percent(discarded_legal):.2f}%)")
+        #print(f"Discarded illegal: {discarded_illegal} ({percent(discarded_illegal):.2f}%)")
+
+        print(f"False positives (dropped by classification): {self.metrics['false_positives']}, ({percent(false_positive):.2f}%)")
+        print(f"False positives legal (dropped by classification): {self.metrics['false_positives_legal']}, ({percent(false_positive_legal):.2f}%)")
+        print(f"Mitigation Discarded (queue full): {self.metrics.get('discarded_mitigation', 0)}")
+
         print("==== END OF REPORT ====")
 
 def run_sim():

@@ -1,40 +1,39 @@
-# PARAMETRI VECCHI 
-
-# # Parametri ottimizzati per performance
-# SINGLE_CENTER_CAPACITY = 10   # Ridotto drasticamente da 100
-# INTERARRIVAL_MEAN = 0.001      # 1,000 rps
-# SERVICE_MEAN_SINGLE = 0.0012   # Servizio leggermente più lento
-# P_FEEDBACK = 0.02              # Feedback al 2%          
-
-# # Parametri del sistema dual-pool
-# SI_MAX = 20
-# ARRIVAL_P = 0.03033
-# ARRIVAL_L1 = 0.4044
-# ARRIVAL_L2 = 12.9289
-# SERVICE_P = 0.03033
-# SERVICE_L1 = 0.3791
-# SERVICE_L2 = 12.1208
-
-# # Parametri simulazione
-# SIM_TIME = 5000              
-# CONF_LEVEL = 2.576
-# N_ARRIVALS = 5000         
-
 # # Parametri batch means 
 # FAST_BATCH_SIZE = 512        
 # FAST_NUM_BATCHES = 256    
 
 # Parameters 
 # Source: Performance Engineering - Learning Through Applications Using JMT 
+# ARRIVAL_P = 0.03033
+# ARRIVAL_L1 = 0.4044
+# ARRIVAL_L2 = 12.9289
+
+# # Dati Papaer
+# ARRIVAL_P = 0.03033
+# ARRIVAL_L1 = 1.2132
+# ARRIVAL_L2 = 38.7867
+
+# # Dati Papaer x 5
+# ARRIVAL_P = 0.03033
+# ARRIVAL_L1 = 2.022
+# ARRIVAL_L2 = 64.6445
+
+# # Dati Papaer x 10
+# ARRIVAL_P = 0.03033
+# ARRIVAL_L1 = 4.044
+# ARRIVAL_L2 = 129.289
+
+# Dati Paper x 40 - taken from "A Simulation Model for the Analysis of DDoS Ampliﬁcation Attacks"
 ARRIVAL_P = 0.03033
-ARRIVAL_L1 = 0.4044
-ARRIVAL_L2 = 12.9289
+ARRIVAL_L1 = 16.176
+ARRIVAL_L2 = 517.156
+
 
 SERVICE_P = 0.03033
 SERVICE_L1 = 0.3791
 SERVICE_L2 = 12.1208
 
-# Source: Typical mitigation time: ~1ms (Cloudflare)
+# Source: Typical mitigation time: ~1ms (Cisco)
 # Source: https://www.cisco.com/c/en/us/td/docs/security/secure-firewall/management-center/device-config/720/management-center-device-config-72/intrusion-performance.html
 MITIGATION_MEAN = 0.0011
 # Buffer capacity for M/M/1/K model

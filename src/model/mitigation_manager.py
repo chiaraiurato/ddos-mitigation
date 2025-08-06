@@ -15,10 +15,28 @@ class MitigationManager:
 
     def handle_job(self, job):
         if not self.center.has_capacity():
-            # Drop packet if queue is full
+            # Inizializza lista di dettagli scarti se non esiste
+            if "discarded_detail" not in self.metrics:
+                self.metrics["discarded_detail"] = []
+
+            # Aggiungi info sul job scartato
+            self.metrics["discarded_detail"].append({
+                "time": self.env.now,
+                "job_id": job.id,
+                "is_legal": job.is_legal
+            })
+
+            # Incrementa contatore aggregato
             self.metrics["discarded_mitigation"] = self.metrics.get("discarded_mitigation", 0) + 1
             return
+
+        if job.is_legal:
+            self.metrics["processed_legal"] = self.metrics.get("processed_legal", 0) + 1
+        else:
+            self.metrics["processed_illegal"] = self.metrics.get("processed_illegal", 0) + 1
+
         self._mitigation_process(job)
+
 
     def _mitigation_process(self, job):
         try:
