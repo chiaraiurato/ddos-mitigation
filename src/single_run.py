@@ -32,7 +32,7 @@ class DDoSSystem:
 
     def arrival_process(self):
         while self.metrics["total_arrivals"] < N_ARRIVALS:
-            interarrival_time = Hyperexponential(ARRIVAL_P, ARRIVAL_L1, ARRIVAL_L2)
+            interarrival_time = Hyperexponential(ARRIVAL_P_VERIFICATION, ARRIVAL_L1_VERIFICATION, ARRIVAL_L2_VERIFICATION)
             yield self.env.timeout(interarrival_time)
 
             self.metrics["total_arrivals"] += 1

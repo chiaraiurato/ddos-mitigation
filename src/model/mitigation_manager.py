@@ -7,7 +7,7 @@ from engineering.costants import *
 class MitigationManager:
     def __init__(self, env, web_server, spike_servers, metrics):
         self.env = env
-        self.center = MitigationCenter(env, "MitigationCenter", capacity=MITIGATION_CAPACITY)
+        self.center = MitigationCenter(env, "MitigationCenter", capacity=MITIGATION_CAPACITY_VERIFICATION)
 
         self.web_server = web_server
         self.spike_servers = spike_servers
@@ -53,14 +53,14 @@ class MitigationManager:
                 self.metrics["false_positives_legal"] += 1
             return
 
-        if random() < P_FEEDBACK:
+        if random() < P_FEEDBACK_VERIFICATION:
             job.arrival = now
             self.handle_job(job)  # retry
         else:
             service_time = Hyperexponential(SERVICE_P, SERVICE_L1, SERVICE_L2)
             job.remaining = service_time
             job.original_service = service_time
-            job.last_updated = now
+            job.last_updated = now        
             # Route the job to the appropriate server (eg. E(N_s) < Threshold)
             if len(self.web_server.jobs) < MAX_WEB_CAPACITY:
                 self.web_server.arrival(job)

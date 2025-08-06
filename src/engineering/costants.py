@@ -4,9 +4,9 @@
 
 # Parameters 
 # Source: Performance Engineering - Learning Through Applications Using JMT 
-# ARRIVAL_P = 0.03033
-# ARRIVAL_L1 = 0.4044
-# ARRIVAL_L2 = 12.9289
+ARRIVAL_P_VERIFICATION = 0.03033
+ARRIVAL_L1_VERIFICATION = 0.4044
+ARRIVAL_L2_VERIFICATION = 12.9289
 
 # # Dati Papaer
 # ARRIVAL_P = 0.03033
@@ -24,9 +24,9 @@
 # ARRIVAL_L2 = 129.289
 
 # Dati Paper x 40 - taken from "A Simulation Model for the Analysis of DDoS Ampliﬁcation Attacks"
-ARRIVAL_P = 0.03033
-ARRIVAL_L1 = 16.176
-ARRIVAL_L2 = 517.156
+# ARRIVAL_P = 0.03033
+# ARRIVAL_L1 = 16.176
+# ARRIVAL_L2 = 517.156
 
 
 SERVICE_P = 0.03033
@@ -40,6 +40,10 @@ MITIGATION_MEAN = 0.0011
 # Typical enterprise firewall buffer sizes
 MITIGATION_CAPACITY = 2000
 
+# Verification
+MITIGATION_CAPACITY_VERIFICATION = 4
+P_FEEDBACK_VERIFICATION = 0
+
 # False positive rate in literature: 0.01–0.03
 # Source: https://www.researchgate.net/publication/335954299
 P_FEEDBACK = 0.02
@@ -50,4 +54,4 @@ P_LECITO = 0.1
 MAX_WEB_CAPACITY = 20
 MAX_SPIKE_CAPACITY = 20
 SCALE_THRESHOLD = 20
-N_ARRIVALS = 5000000
+N_ARRIVALS = 64628
