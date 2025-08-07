@@ -1,16 +1,18 @@
 import simpy
 import numpy as np
-from library.rvgs import Hyperexponential
+from library.rvgs import Hyperexponential, Exponential
 from library.rngs import random
 
 from engineering.costants import *
+from engineering.distributions import get_interarrival_time
 from model.job import Job
 from model.processor_sharing_server import ProcessorSharingServer
 from model.mitigation_manager import MitigationManager
 
 class DDoSSystem:
-    def __init__(self, env):
+    def __init__(self, env, mode):
         self.env = env
+        self.mode = mode
         self.web_server = ProcessorSharingServer(env, "Web")
         self.spike_servers = [ProcessorSharingServer(env, "Spike-0")]
 
@@ -25,14 +27,15 @@ class DDoSSystem:
         }
 
         self.mitigation_manager = MitigationManager(
-            env, self.web_server, self.spike_servers, self.metrics
+            env, self.web_server, self.spike_servers, self.metrics, self.mode
         )
 
         self.env.process(self.arrival_process())
 
     def arrival_process(self):
         while self.metrics["total_arrivals"] < N_ARRIVALS:
-            interarrival_time = Hyperexponential(ARRIVAL_P_VERIFICATION, ARRIVAL_L1_VERIFICATION, ARRIVAL_L2_VERIFICATION)
+            
+            interarrival_time = get_interarrival_time(self.mode)
             yield self.env.timeout(interarrival_time)
 
             self.metrics["total_arrivals"] += 1
@@ -103,12 +106,28 @@ class DDoSSystem:
 
         print("==== END OF REPORT ====")
 
+def choose_mode():
+    print("Scegli la modalità:")
+    print("1. Verifica (distribuzioni esponenziali)")
+    print("2. Simulazione standard (distribuzioni iperesponenziali)")
+    choice = input("Inserisci 1 o 2: ").strip()
+    if choice == "1":
+        return "verification"
+    elif choice == "2":
+        return "standard"
+    else:
+        print("Scelta non valida. Default: standard.")
+        return "standard"
+
+
 def run_sim():
-    print("Starting DDoS Mitigation Simulation...")
+    mode = choose_mode()
+    print(f"\nModalità selezionata: {mode.upper()}")
     env = simpy.Environment()
-    system = DDoSSystem(env)
+    system = DDoSSystem(env, mode)
     env.run()
     system.report()
+
 
 if __name__ == "__main__":
     run_sim()

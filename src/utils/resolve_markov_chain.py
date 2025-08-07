@@ -265,17 +265,17 @@ class DDoSMarkovChain:
         print("="*60)
         
         # Dati simulazione (estratti dal tuo output)
-        sim_time = 10023.5905
+        sim_time = 9736.3168
         sim_arrivals = 64628
-        sim_web_completions = 54660
-        sim_spike_completions = 9354
-        sim_web_util = 0.893019
-        sim_web_resp_time = 1.719347
-        sim_web_throughput = 5.453136
-        sim_spike_util = 0.140325
-        sim_spike_resp_time = 0.366791
-        sim_spike_throughput = 0.933199
-        sim_fp_dropped = 614
+        sim_web_completions = 59215
+        sim_spike_completions = 4728
+        sim_web_util = 0.970123
+        sim_web_resp_time = 1.907826
+        sim_web_throughput = 6.081869
+        sim_spike_util = 0.076624
+        sim_spike_resp_time = 0.328638
+        sim_spike_throughput = 0.485605
+        sim_fp_dropped = 685
         
         print(f"\nUTILIZZAZIONI:")
         print(f"Web Server    - Analitico: {metrics['utilizations']['web']:.6f}, Simulazione: {sim_web_util:.6f}")

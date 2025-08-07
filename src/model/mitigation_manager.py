@@ -1,12 +1,15 @@
 from library.rvgs import Exponential, Hyperexponential
 from library.rngs import random
+
 from model.mitigation_center import MitigationCenter
 from model.processor_sharing_server import ProcessorSharingServer
 from engineering.costants import *
+from engineering.distributions import get_service_time
 
 class MitigationManager:
-    def __init__(self, env, web_server, spike_servers, metrics):
+    def __init__(self, env, web_server, spike_servers, metrics, mode):
         self.env = env
+        self.mode = mode
         self.center = MitigationCenter(env, "MitigationCenter", capacity=MITIGATION_CAPACITY_VERIFICATION)
 
         self.web_server = web_server
@@ -57,7 +60,7 @@ class MitigationManager:
             job.arrival = now
             self.handle_job(job)  # retry
         else:
-            service_time = Hyperexponential(SERVICE_P, SERVICE_L1, SERVICE_L2)
+            service_time = get_service_time(self.mode)
             job.remaining = service_time
             job.original_service = service_time
             job.last_updated = now        

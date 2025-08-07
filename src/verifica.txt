@@ -1,0 +1,31 @@
+Starting DDoS Mitigation Simulation...
+
+==== SIMULATION COMPLETE ====
+Total time: 9736.3168
+Arrivals: 64628
+Lecite: 6580, Illecite: 58048
+Mitigation completions: 64628
+False positives (dropped): 685
+  Di cui lecite: 72
+Total discarded jobs: 0
+Web Completions: 59215
+  Lecite  : 6011
+  Illecite: 53204
+Web Avg Resp Time: 1.907826
+Web Utilization: 0.970123
+Web Throughput: 6.081869
+Spike-0 Completions: 4728
+  Lecite  : 497
+  Illecite: 4231
+Spike-0 Avg Resp Time: 0.328638
+Spike-0 Utilization: 0.076624
+Spike-0 Throughput: 0.485605
+Mitigation Discarded : 0
+
+==== GLOBAL STATS ====
+Processed legal  : 6580 (10.18%)
+Processed illegal: 58048 (89.82%)
+False positives (dropped by classification): 685, (1.06%)
+False positives legal (dropped by classification): 72, (0.11%)
+Mitigation Discarded (queue full): 0
+==== END OF REPORT ====
