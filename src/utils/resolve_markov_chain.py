@@ -170,9 +170,9 @@ class DDoSMarkovChain:
             if i > 0:
                 util_mitigation += prob
             if w > 0:
-                util_web += prob * w / self.K_web
+                util_web += prob
             if s > 0:
-                util_spike += prob * s / self.K_spike
+                util_spike += prob
             
             # Numero medio di job
             avg_jobs_mitigation += prob * i

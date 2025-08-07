@@ -1,10 +1,10 @@
 import simpy
 import numpy as np
-from library.rvgs import Hyperexponential, Exponential
 from library.rngs import random
 
 from engineering.costants import *
 from engineering.distributions import get_interarrival_time
+from engineering.statistics import batch_means, compute_throughput
 from model.job import Job
 from model.processor_sharing_server import ProcessorSharingServer
 from model.mitigation_manager import MitigationManager
@@ -103,6 +103,30 @@ class DDoSSystem:
         print(f"False positives (dropped by classification): {self.metrics['false_positives']}, ({percent(false_positive):.2f}%)")
         print(f"False positives legal (dropped by classification): {self.metrics['false_positives_legal']}, ({percent(false_positive_legal):.2f}%)")
         print(f"Mitigation Discarded (queue full): {self.metrics.get('discarded_mitigation', 0)}")
+
+        if self.mode == "verification":
+            print("\n==== INTERVALLI DI CONFIDENZA (Batch Means) ====")
+            batch_size = 512  # o altro valore adeguato
+
+            def print_ci(label, data):
+                try:
+                    mean, ci = batch_means(data, batch_size)
+                    print(f"{label}: {mean:.6f} ± {ci:.6f} (95% CI)")
+                except Exception as e:
+                    print(f"{label}: errore - {e}")
+
+            print("\n-- Web Server --")
+            print_ci("Response Time", self.web_server.completed_jobs)
+            print_ci("Utilization", [1.0 if x > 0 else 0.0 for x in self.web_server.completed_jobs])
+            print_ci("Throughput", [1.0] * len(self.web_server.completed_jobs))  # approssimazione batch
+            
+
+            print("\n-- Spike Server --")
+            for i, server in enumerate(self.spike_servers):
+                print(f"Spike-{i}:")
+                print_ci("Response Time", server.completed_jobs)
+                print_ci("Utilization", [1.0 if x > 0 else 0.0 for x in server.completed_jobs])
+                print_ci("Throughput", [1.0] * len(server.completed_jobs))  # approssimazione
 
         print("==== END OF REPORT ====")
 
