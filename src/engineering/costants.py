@@ -1,6 +1,8 @@
-# # Parametri batch means 
-# FAST_BATCH_SIZE = 512        
-# FAST_NUM_BATCHES = 256    
+# Batch Means Parameters
+BATCH_SIZE = 1028
+N_BATCH = 256
+CONFIDENCE_LEVEL = 0.95
+
 
 # Parameters 
 # Source: Performance Engineering - Learning Through Applications Using JMT 
@@ -55,3 +57,6 @@ MAX_WEB_CAPACITY = 20
 MAX_SPIKE_CAPACITY = 20
 SCALE_THRESHOLD = 20
 N_ARRIVALS = 64628
+
+
+MAX_SIMULATION_TIME = 20000  

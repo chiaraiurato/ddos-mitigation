@@ -15,22 +15,3 @@ def batch_means(data, batch_size):
     ci_half_width = t.ppf(0.975, df=k - 1) * std_err
 
     return mean, ci_half_width
-
-def compute_throughput(timestamps, window=1.0):
-    if not timestamps:
-        return []
-
-    start = timestamps[0]
-    end = timestamps[-1]
-    windows = np.arange(start, end, window)
-    
-    counts = []
-    idx = 0
-    for w_start in windows:
-        w_end = w_start + window
-        count = 0
-        while idx < len(timestamps) and timestamps[idx] < w_end:
-            count += 1
-            idx += 1
-        counts.append(count / window)
-    return counts
