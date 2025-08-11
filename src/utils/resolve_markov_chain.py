@@ -180,12 +180,14 @@ class DDoSMarkovChain:
             avg_jobs_spike += prob * s
             
             # Throughput (usando Little's Law dopo)
+            # Throughput (solo se ci sono job in servizio)
             if i > 0:
                 throughput_mitigation += prob * self.mu_mitigation
             if w > 0:
                 throughput_web += prob * self.mu_web
             if s > 0:
                 throughput_spike += prob * self.mu_spike
+
             
             # Calcolo probabilità di routing dal mitigation center
             if i > 0:  # Se c'è almeno un job nel centro mitigazione

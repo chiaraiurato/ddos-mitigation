@@ -12,6 +12,9 @@ from model.job import Job
 from model.processor_sharing_server import ProcessorSharingServer
 from model.mitigation_manager import MitigationManager
 
+TIME_WINDOW = 30.0  # secondi
+
+
 class DDoSSystem:
     def __init__(self, env, mode):
         self.env = env
@@ -25,7 +28,6 @@ class DDoSSystem:
             self.sum_rt_in_batch = 0.0
             self.batch_means = []
 
-        
         self.metrics = {
             "mitigation_completions": 0,
             "total_arrivals": 0,
@@ -43,7 +45,6 @@ class DDoSSystem:
 
     def arrival_process(self):
         while self.metrics["total_arrivals"] < N_ARRIVALS:
-            
             interarrival_time = get_interarrival_time(self.mode)
             yield self.env.timeout(interarrival_time)
 
@@ -73,8 +74,28 @@ class DDoSSystem:
             self.sum_rt_in_batch = 0
             self.batch_count += 1
 
+    @staticmethod
+    def direct_ci(data, confidence=0.95):
+        n = len(data)
+        if n < 2:
+            return np.mean(data), float('nan')
+        mean = np.mean(data)
+        std_err = np.std(data, ddof=1) / np.sqrt(n)
+        ci = t.ppf((1 + confidence) / 2., n - 1) * std_err
+        return mean, ci
+
     def report(self):
         now = self.env.now
+
+        self.web_server.update(now)
+        for s in self.spike_servers:
+            s.update(now)
+
+
+        util_samples, _ = self.web_server.get_batch_samples(TIME_WINDOW, now)
+        print("DEBUG mean util web windows:", np.mean(util_samples), "global:", self.web_server.busy_time / now)
+
+        
         print("\n==== SIMULATION COMPLETE ====")
         print(f"Total time: {now:.4f}")
         print(f"Arrivals: {self.metrics['total_arrivals']}")
@@ -98,6 +119,22 @@ class DDoSSystem:
             else:
                 print(f"{name} Completions: 0")
 
+        def print_ci(label, data, batch_size):
+            try:
+                if len(data) < batch_size or len(data) // batch_size < 2:
+                    raise ValueError(f"Solo {len(data)} campioni → insufficienti per almeno 2 batch.")
+                mean, ci = batch_means(data, batch_size)
+                print(f"{label}: {mean:.6f} ± {ci:.6f} (95% CI)")
+            except Exception as e:
+                print(f"{label}: errore - {e}")
+
+        def print_direct_ci(label, data):
+            mean, ci = DDoSSystem.direct_ci(data)
+            if np.isnan(ci):
+                print(f"{label}: errore - solo 1 campione disponibile")
+            else:
+                print(f"{label}: {mean:.6f} ± {ci:.6f} (95% CI)")
+
         stats("Web", self.web_server)
         for i, server in enumerate(self.spike_servers):
             stats(f"Spike-{i}", server)
@@ -109,7 +146,6 @@ class DDoSSystem:
         discarded_total = len(discarded)
         processed_legal = self.metrics.get("processed_legal", 0)
         processed_illegal = self.metrics.get("processed_illegal", 0)
-
         false_positive = self.metrics.get("false_positives", 0)
         false_positive_legal = self.metrics.get("false_positives_legal", 0)
 
@@ -124,33 +160,25 @@ class DDoSSystem:
         print(f"False positives legal (dropped by classification): {false_positive_legal}, ({percent(false_positive_legal):.2f}%)")
         print(f"Mitigation Discarded (queue full): {self.metrics.get('discarded_mitigation', 0)}")
 
-        # === Confidence Intervals via Batch Means (only in verification mode) ===
         if self.mode == "verification":
-            print("\n==== INTERVALLI DI CONFIDENZA (Batch Means) ====")
-
-            def print_ci(label, data, batch_size):
-                try:
-                    mean, ci = batch_means(data, batch_size)
-                    print(f"{label}: {mean:.6f} ± {ci:.6f} (95% CI)")
-                except Exception as e:
-                    print(f"{label}: errore - {e}")
+            print("\n==== INTERVALLI DI CONFIDENZA (Batch Means / Direct CI) ====")
 
             print("\n-- Web Server --")
             print_ci("Response Time", self.web_server.completed_jobs, BATCH_SIZE)
-            util_samples, thr_samples = self.web_server.get_batch_samples(BATCH_SIZE, now)
-            print_ci("Utilization", util_samples, BATCH_SIZE)
-            print_ci("Throughput", thr_samples, BATCH_SIZE)
+            util_samples, thr_samples = self.web_server.get_batch_samples(TIME_WINDOW, now)
+            print_direct_ci("Utilization", util_samples)
+            print_direct_ci("Throughput", thr_samples)
 
             print("\n-- Spike Server --")
             for i, server in enumerate(self.spike_servers):
                 print(f"Spike-{i}:")
                 print_ci("Response Time", server.completed_jobs, BATCH_SIZE)
-                util_samples, thr_samples = server.get_batch_samples(BATCH_SIZE, now)
-                print_ci("Utilization", util_samples, BATCH_SIZE)
-                print_ci("Throughput", thr_samples, BATCH_SIZE)
-
+                util_samples, thr_samples = server.get_batch_samples(TIME_WINDOW, now)
+                print_direct_ci("Utilization", util_samples)
+                print_direct_ci("Throughput", thr_samples)
 
         print("==== END OF REPORT ====")
+
 
 def choose_mode():
     print("Scegli la modalità:")

@@ -1,5 +1,5 @@
 # Batch Means Parameters
-BATCH_SIZE = 1028
+BATCH_SIZE = 1024
 N_BATCH = 256
 CONFIDENCE_LEVEL = 0.95
 
