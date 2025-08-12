@@ -26,9 +26,9 @@ ARRIVAL_L2_VERIFICATION = 12.9289
 # ARRIVAL_L2 = 129.289
 
 # Dati Paper x 40 - taken from "A Simulation Model for the Analysis of DDoS Ampliﬁcation Attacks"
-# ARRIVAL_P = 0.03033
-# ARRIVAL_L1 = 16.176
-# ARRIVAL_L2 = 517.156
+ARRIVAL_P = 0.03033
+ARRIVAL_L1 = 16.176
+ARRIVAL_L2 = 517.156
 
 
 SERVICE_P = 0.03033
@@ -56,7 +56,14 @@ P_LECITO = 0.1
 MAX_WEB_CAPACITY = 20
 MAX_SPIKE_CAPACITY = 20
 SCALE_THRESHOLD = 20
-N_ARRIVALS = 64628
 
+# Arrivals Number
+N_ARRIVALS = 5000000
+N_ARRIVALS_VERIFICATION = 64628
 
+# Simulation Time
 MAX_SIMULATION_TIME = 20000  
+
+# Variable used for batch means
+TIME_WINDOW = 30.0          # seconds per time window
+TIME_WINDOWS_PER_BATCH = 8  # how many windows form a batch for CI on util/throughput

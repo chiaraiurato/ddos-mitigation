@@ -138,49 +138,55 @@ class DDoSMarkovChain:
         return pi
     
     def calculate_metrics(self, pi):
-        """Calcola le metriche di performance"""
+        """Calcola le metriche di performance (incluso il Mitigation)."""
         print("Calcolo metriche di performance...")
-        
+
         # Utilizzazioni
         util_mitigation = 0.0
         util_web = 0.0
         util_spike = 0.0
-        
+
         # Numero medio di job
         avg_jobs_mitigation = 0.0
         avg_jobs_web = 0.0
         avg_jobs_spike = 0.0
-        
-        # Throughput
+
+        # Throughput (tasso di completamento, per PS è μ * P{n>0})
         throughput_mitigation = 0.0
         throughput_web = 0.0
         throughput_spike = 0.0
-        
-        # Probabilità di routing dal mitigation center
+
+        # Probabilità di routing dal mitigation center (condizionate a una partenza dal centro)
         prob_route_to_web = 0.0
         prob_route_to_spike = 0.0
         prob_discarded_fp = 0.0
         prob_discarded_full = 0.0
         total_mitigation_departures = 0.0
-        
+
+        # Probabilità che il centro mitigazione sia pieno (per arrivi bloccati)
+        prob_mitigation_full = 0.0
+
         for idx, (i, w, s) in enumerate(self.states):
             prob = pi[idx]
-            
-            # Utilizzazioni
+
+            # Mitigation pieno?
+            if i == self.K_mitigation:
+                prob_mitigation_full += prob
+
+            # Utilizzazioni (P{n>0})
             if i > 0:
                 util_mitigation += prob
             if w > 0:
                 util_web += prob
             if s > 0:
                 util_spike += prob
-            
+
             # Numero medio di job
             avg_jobs_mitigation += prob * i
             avg_jobs_web += prob * w
             avg_jobs_spike += prob * s
-            
-            # Throughput (usando Little's Law dopo)
-            # Throughput (solo se ci sono job in servizio)
+
+            # Throughput istantaneo nei server (per PS è μ se n>0, altrimenti 0)
             if i > 0:
                 throughput_mitigation += prob * self.mu_mitigation
             if w > 0:
@@ -188,46 +194,43 @@ class DDoSMarkovChain:
             if s > 0:
                 throughput_spike += prob * self.mu_spike
 
-            
-            # Calcolo probabilità di routing dal mitigation center
-            if i > 0:  # Se c'è almeno un job nel centro mitigazione
+            # Routing/Drop alla partenza dal Mitigation
+            if i > 0:
+                # tasso di partenza dal centro mitigazione nello stato (i,w,s)
                 departure_rate = prob * self.mu_mitigation
                 total_mitigation_departures += departure_rate
-                
-                # Probabilità di essere scartato per falso positivo
-                p_fp_discard = self.p_lecito * self.p_fp + self.p_illecito * self.p_fp
+
+                # drop per falso positivo (vale sia per lecito che illecito)
+                p_fp_discard = self.p_fp  # perché p_lecito+p_illecito≈1
                 prob_discarded_fp += departure_rate * p_fp_discard
-                
-                # Probabilità di essere inoltrato (non scartato per FP)
-                p_forward = 1 - p_fp_discard
-                
+
+                # inoltro (non FP)
+                p_forward = 1.0 - p_fp_discard
                 if w < self.K_web:
-                    # Web server non saturo -> va al web
                     prob_route_to_web += departure_rate * p_forward
                 elif s < self.K_spike:
-                    # Web saturo ma spike no -> va allo spike
                     prob_route_to_spike += departure_rate * p_forward
                 else:
-                    # Entrambi saturi -> scartato
                     prob_discarded_full += departure_rate * p_forward
-        
-        # Calcola tassi effettivi di arrivo
-        effective_arrival_rate = self.lambda_arrival * (1 - (prob_mitigation_full if 'prob_mitigation_full' in locals() else 0))
-        
-        # Normalizza le probabilità di routing
+
+        # Tasso di arrivo effettivo al sistema (blocchi se Mitigation è pieno)
+        effective_arrival_rate = self.lambda_arrival * (1.0 - prob_mitigation_full)
+
+        # Normalizza le probabilità di routing (condizionate alla partenza dal Mitigation)
         if total_mitigation_departures > 0:
-            prob_route_to_web = prob_route_to_web / total_mitigation_departures
-            prob_route_to_spike = prob_route_to_spike / total_mitigation_departures
-            prob_discarded_fp = prob_discarded_fp / total_mitigation_departures
-            prob_discarded_full = prob_discarded_full / total_mitigation_departures
-        
-        # Tempi di risposta (Little's Law: T = N/λ)
-        resp_time_web = avg_jobs_web / throughput_web if throughput_web > 0 else 0
-        resp_time_spike = avg_jobs_spike / throughput_spike if throughput_spike > 0 else 0
-        
-        # Job scartati per falsi positivi (tasso)
-        jobs_discarded_fp_rate = throughput_mitigation * (prob_discarded_fp if total_mitigation_departures > 0 else 0)
-        
+            prob_route_to_web   /= total_mitigation_departures
+            prob_route_to_spike /= total_mitigation_departures
+            prob_discarded_fp   /= total_mitigation_departures
+            prob_discarded_full /= total_mitigation_departures
+
+        # Tempi di risposta (Little: T = N / λ_eff_out)
+        resp_time_mitigation = (avg_jobs_mitigation / throughput_mitigation) if throughput_mitigation > 0 else 0.0
+        resp_time_web        = (avg_jobs_web        / throughput_web)        if throughput_web        > 0 else 0.0
+        resp_time_spike      = (avg_jobs_spike      / throughput_spike)      if throughput_spike      > 0 else 0.0
+
+        # Tasso di job scartati per FP (tra le partenze dal Mitigation)
+        jobs_discarded_fp_rate = throughput_mitigation * prob_discarded_fp if total_mitigation_departures > 0 else 0.0
+
         return {
             'utilizations': {
                 'mitigation': util_mitigation,
@@ -245,6 +248,7 @@ class DDoSMarkovChain:
                 'spike': throughput_spike
             },
             'response_times': {
+                'mitigation': resp_time_mitigation,
                 'web': resp_time_web,
                 'spike': resp_time_spike
             },
@@ -257,60 +261,64 @@ class DDoSMarkovChain:
             'rates': {
                 'effective_arrival': effective_arrival_rate,
                 'jobs_discarded_fp': jobs_discarded_fp_rate
+            },
+            'probabilities': {
+                'mitigation_full': prob_mitigation_full
             }
         }
-    
+
     def print_comparison(self, metrics, simulation_data):
-        """Confronta i risultati analitici con la simulazione"""
+        """Confronta i risultati analitici con la simulazione (ora include il Mitigation)."""
         print("\n" + "="*60)
         print("CONFRONTO RISULTATI: ANALITICO vs SIMULAZIONE")
         print("="*60)
-        
-        # Dati simulazione (estratti dal tuo output)
-        sim_time = 9736.3168
-        sim_arrivals = 64628
+
+        # Dati simulazione (metti i tuoi valori reali qui)
         sim_web_completions = 59215
         sim_spike_completions = 4728
-        sim_web_util = 0.970123
-        sim_web_resp_time = 1.907826
-        sim_web_throughput = 6.081869
-        sim_spike_util = 0.076624
-        sim_spike_resp_time = 0.328638
-        sim_spike_throughput = 0.485605
         sim_fp_dropped = 685
-        
+
+        # UTILIZZAZIONI
         print(f"\nUTILIZZAZIONI:")
-        print(f"Web Server    - Analitico: {metrics['utilizations']['web']:.6f}, Simulazione: {sim_web_util:.6f}")
-        print(f"Spike Server  - Analitico: {metrics['utilizations']['spike']:.6f}, Simulazione: {sim_spike_util:.6f}")
-        
+        print(f"Mitigation     - Analitico: {metrics['utilizations']['mitigation']:.6f}")
+        print(f"Web Server     - Analitico: {metrics['utilizations']['web']:.6f}")
+        print(f"Spike Server   - Analitico: {metrics['utilizations']['spike']:.6f}")
+
+        # THROUGHPUT
         print(f"\nTHROUGHPUT (job/s):")
-        print(f"Web Server    - Analitico: {metrics['throughput']['web']:.6f}, Simulazione: {sim_web_throughput:.6f}")
-        print(f"Spike Server  - Analitico: {metrics['throughput']['spike']:.6f}, Simulazione: {sim_spike_throughput:.6f}")
-        
+        print(f"Mitigation     - Analitico: {metrics['throughput']['mitigation']:.6f}")
+        print(f"Web Server     - Analitico: {metrics['throughput']['web']:.6f}")
+        print(f"Spike Server   - Analitico: {metrics['throughput']['spike']:.6f}")
+
+        # TEMPI DI RISPOSTA
         print(f"\nTEMPI DI RISPOSTA (s):")
-        print(f"Web Server    - Analitico: {metrics['response_times']['web']:.6f}, Simulazione: {sim_web_resp_time:.6f}")
-        print(f"Spike Server  - Analitico: {metrics['response_times']['spike']:.6f}, Simulazione: {sim_spike_resp_time:.6f}")
-        
+        print(f"Mitigation     - Analitico: {metrics['response_times']['mitigation']:.6f}")
+        print(f"Web Server     - Analitico: {metrics['response_times']['web']:.6f}")
+        print(f"Spike Server   - Analitico: {metrics['response_times']['spike']:.6f}")
+
+        # ALTRE METRICHE
         print(f"\nALTRE METRICHE:")
-        print(f"Tasso arrivi effettivo - Analitico: {metrics['rates']['effective_arrival']:.6f}")
-        print(f"Job scartati per FP    - Analitico: {metrics['rates']['jobs_discarded_fp']:.6f}, Simulazione: {sim_fp_dropped/sim_time:.6f}")
-        
-        print(f"\nPROBABILITÀ DI ROUTING DAL MITIGATION CENTER:")
+        print(f"P(Mitigation pieno)    - Analitico: {metrics['probabilities']['mitigation_full']:.6f}")
+        print(f"Tasso arrivi effettivi - Analitico: {metrics['rates']['effective_arrival']:.6f}")
+        print(f"Job scartati per FP    - Analitico: {metrics['rates']['jobs_discarded_fp']:.6f}")
+
+        # ROUTING DAL MITIGATION
+        print(f"\nPROBABILITÀ DI ROUTING DAL MITIGATION CENTER (condizionate a una partenza):")
         print(f"→ Web Server          - {metrics['routing_probabilities']['to_web']:.6f} ({metrics['routing_probabilities']['to_web']*100:.2f}%)")
         print(f"→ Spike Server        - {metrics['routing_probabilities']['to_spike']:.6f} ({metrics['routing_probabilities']['to_spike']*100:.2f}%)")
         print(f"→ Scartato (FP)       - {metrics['routing_probabilities']['discarded_fp']:.6f} ({metrics['routing_probabilities']['discarded_fp']*100:.2f}%)")
         print(f"→ Scartato (Full)     - {metrics['routing_probabilities']['discarded_full']:.6f} ({metrics['routing_probabilities']['discarded_full']*100:.2f}%)")
-        
-        # Calcolo percentuali dalla simulazione per confronto
-        sim_total_completions = sim_web_completions + sim_spike_completions + sim_fp_dropped
-        sim_pct_web = (sim_web_completions / sim_total_completions) * 100 if sim_total_completions > 0 else 0
-        sim_pct_spike = (sim_spike_completions / sim_total_completions) * 100 if sim_total_completions > 0 else 0
-        sim_pct_fp = (sim_fp_dropped / sim_total_completions) * 100 if sim_total_completions > 0 else 0
-        
-        print(f"\nCONFRONTO PERCENTUALI (Analitico vs Simulazione):")
-        print(f"Jobs → Web Server     - {metrics['routing_probabilities']['to_web']*100:.2f}% vs {sim_pct_web:.2f}%")
-        print(f"Jobs → Spike Server   - {metrics['routing_probabilities']['to_spike']*100:.2f}% vs {sim_pct_spike:.2f}%")
-        print(f"Jobs scartati (FP)    - {metrics['routing_probabilities']['discarded_fp']*100:.2f}% vs {sim_pct_fp:.2f}%")
+
+        # Confronto percentuali con la simulazione (grezzo, sui conteggi finali)
+        sim_total_departures_from_mit = sim_web_completions + sim_spike_completions + sim_fp_dropped
+        sim_pct_web = (sim_web_completions / sim_total_departures_from_mit) * 100 if sim_total_departures_from_mit > 0 else 0.0
+        sim_pct_spike = (sim_spike_completions / sim_total_departures_from_mit) * 100 if sim_total_departures_from_mit > 0 else 0.0
+        sim_pct_fp = (sim_fp_dropped / sim_total_departures_from_mit) * 100 if sim_total_departures_from_mit > 0 else 0.0
+
+        print(f"\nCONFRONTO PERCENTUALI:")
+        print(f"Jobs → Web Server     - {metrics['routing_probabilities']['to_web']*100:.2f}%")
+        print(f"Jobs → Spike Server   - {metrics['routing_probabilities']['to_spike']*100:.2f}%")
+        print(f"Jobs scartati (FP)    - {metrics['routing_probabilities']['discarded_fp']*100:.2f}%")
 
 def main():
     print("Avvio risoluzione catena di Markov per DDoS Mitigation System...")
