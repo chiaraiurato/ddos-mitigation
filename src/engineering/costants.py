@@ -59,7 +59,7 @@ SCALE_THRESHOLD = 20
 
 # Arrivals Number
 # N_ARRIVALS = 2585120
-N_ARRIVALS = 64628
+N_ARRIVALS = 500000
 N_ARRIVALS_VERIFICATION = 64628
 
 # Simulation Time
@@ -67,4 +67,17 @@ MAX_SIMULATION_TIME = 20000
 
 # Variable used for batch means
 TIME_WINDOW = 30.0          # seconds per time window
+TIME_WINDOWS_PER_BATCH_VALIDATION = 32
 TIME_WINDOWS_PER_BATCH = 8  # how many windows form a batch for CI on util/throughput
+
+# Multistream 
+RNG_SEED_VERIFICATION = 123456789
+RNG_SEED_STANDARD     = 42
+
+RNG_STREAM_ARRIVALS            = 0
+RNG_STREAM_MITIGATION_SERVICE  = 1
+RNG_STREAM_SERVICE_TIMES       = 2   # service time dei job (web/spike)
+RNG_STREAM_FALSE_POSITIVE      = 3
+RNG_STREAM_FEEDBACK            = 4
+
+

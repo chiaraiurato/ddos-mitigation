@@ -1,10 +1,9 @@
-from library.rngs import random
+from library.rngs import random, selectStream
 
 from model.mitigation_center import MitigationCenter
 from model.processor_sharing_server import ProcessorSharingServer
 from engineering.costants import *
 from engineering.distributions import get_service_time
-
 
 class MitigationManager:
     """
@@ -68,6 +67,7 @@ class MitigationManager:
         now = self.env.now
 
         # Classificazione: false positive => job droppato
+        selectStream(RNG_STREAM_FALSE_POSITIVE)
         if random() < P_FALSE_POSITIVE:
             self.metrics["false_positives"] = self.metrics.get("false_positives", 0) + 1
             if job.is_legal:
@@ -75,12 +75,14 @@ class MitigationManager:
             return
 
         # Feedback (retry) verso la mitigazione
+        selectStream(RNG_STREAM_FEEDBACK) 
         if random() < P_FEEDBACK_VERIFICATION:
             job.arrival = now
             self.handle_job(job)  # retry
             return
 
         # Superata la mitigazione: assegna tempo di servizio e route verso Web/Spike
+        selectStream(RNG_STREAM_SERVICE_TIMES) 
         service_time = get_service_time(self.mode)
         job.remaining = service_time
         job.original_service = service_time

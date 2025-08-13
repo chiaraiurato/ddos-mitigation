@@ -1,6 +1,8 @@
 import simpy
 from library.rvgs import Exponential
 from engineering.costants import MITIGATION_MEAN
+from library.rngs import selectStream
+from engineering.costants import RNG_STREAM_MITIGATION_SERVICE
 
 
 class MitigationCenter:
@@ -48,6 +50,7 @@ class MitigationCenter:
             self.busy = True
             self.last_start = self.env.now
 
+            selectStream(RNG_STREAM_MITIGATION_SERVICE)
             # Tempo di servizio del centro (esponenziale con media MITIGATION_MEAN)
             yield self.env.timeout(Exponential(MITIGATION_MEAN))
 

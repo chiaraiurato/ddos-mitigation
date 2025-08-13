@@ -2,6 +2,10 @@ import sys
 from controller.verification_run import run_verification, run_standard
 from controller.validation import run_validation
 
+from library.rngs import plantSeeds
+from engineering.costants import RNG_SEED_VERIFICATION, RNG_SEED_STANDARD
+
+
 
 def choose_mode():
     print("Scegli la modalità:")
@@ -29,6 +33,11 @@ def run_sim():
     while True:
         mode = choose_mode()
         print(f"\nModalità selezionata: {mode.upper()}")
+
+        if mode == "verification":
+            plantSeeds(RNG_SEED_VERIFICATION)
+        else:
+            plantSeeds(RNG_SEED_STANDARD)
 
         if mode == "verification":
             run_verification()
