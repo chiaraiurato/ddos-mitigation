@@ -10,6 +10,7 @@ from model.job import Job
 from model.processor_sharing_server import ProcessorSharingServer
 from model.mitigation_manager import MitigationManager
 
+
 class DDoSSystem:
     def __init__(self, env, mode):
         self.env = env
@@ -25,7 +26,7 @@ class DDoSSystem:
 
         # Metriche globali
         self.metrics = {
-            "mitigation_completions": 0,   # aggiornate nel MitigationCenter al completamento reale
+            "mitigation_completions": 0,
             "total_arrivals": 0,
             "false_positives": 0,
             "legal_arrivals": 0,
@@ -40,15 +41,16 @@ class DDoSSystem:
         self.env.process(self.arrival_process(mode))
 
     def arrival_process(self, mode):
-        
-        if(mode == "verification"): 
+        # In 'validation' useremo la stessa logica della 'standard' (gestita in validation_run)
+        if mode == "verification":
             arrivals = N_ARRIVALS_VERIFICATION
-        else:
-            arrivals = N_ARRIVALS
+            interarrival_mode = "verification"
+        else:  # "standard"
+            arrivals = N_ARRIVALS  # assicurati che esista in constants (oppure rinomina in N_ARRIVALS_STANDARD)
+            interarrival_mode = "standard"
 
-        
         while self.metrics["total_arrivals"] < arrivals:
-            interarrival_time = get_interarrival_time(self.mode)
+            interarrival_time = get_interarrival_time(interarrival_mode)
             yield self.env.timeout(interarrival_time)
 
             self.metrics["total_arrivals"] += 1
@@ -63,7 +65,7 @@ class DDoSSystem:
             self.mitigation_manager.handle_job(job)
 
     def notify_completion(self, server_name, response_time):
-        # Batch Means per la sola 'verification' e solo per Web
+        # Usato solo se imposti self.web_server.set_observer(self)
         if self.mode != "verification" or server_name != "Web":
             return
         self.completed_in_batch += 1
@@ -149,7 +151,6 @@ class DDoSSystem:
 
         # === GLOBAL SUMMARY ===
         print("\n==== GLOBAL STATS ====")
-        print()
         total = self.metrics["total_arrivals"]
         processed_legal = self.metrics.get("processed_legal", 0)
         processed_illegal = self.metrics.get("processed_illegal", 0)
@@ -164,13 +165,13 @@ class DDoSSystem:
         print(f"False positives legal (dropped by classification): {false_positive_legal}, ({percent(false_positive_legal):.2f}%)")
         print(f"Mitigation Discarded (queue full): {self.metrics.get('discarded_mitigation', 0)}")
 
-        # === CI (modalità verification) ===
+        # === CI (solo in verification) ===
         if self.mode == "verification":
-            print("\n==== INTERVALLI DI CONFIDENZA (Batch Means) ====")
+            print("\n======== INTERVALLI DI CONFIDENZA ========")
 
             # --- Web ---
             print("\n-- Web Server --")
-            print_ci("Response Time (batch completamenti):     ", self.web_server.completed_jobs, BATCH_SIZE)
+            print_ci("Response Time:                           ", self.web_server.completed_jobs, BATCH_SIZE)
             util_samples, thr_samples = window_util_thr(self.web_server.busy_periods,
                                                         self.web_server.completion_times,
                                                         TIME_WINDOW, now)
@@ -181,16 +182,16 @@ class DDoSSystem:
             print("\n-- Spike Server --")
             for i, server in enumerate(self.spike_servers):
                 print(f"Spike-{i}:")
-                print_ci("Response Time (batch completamenti): ", server.completed_jobs, BATCH_SIZE)
+                print_ci("Response Time:                           ", server.completed_jobs, BATCH_SIZE)
                 util_samples, thr_samples = window_util_thr(server.busy_periods,
                                                             server.completion_times,
                                                             TIME_WINDOW, now)
-                print_ci(f"Utilization:                         ", util_samples, TIME_WINDOWS_PER_BATCH)
-                print_ci(f"Throughput:                          ", thr_samples, TIME_WINDOWS_PER_BATCH)
+                print_ci(f"Utilization:                             ", util_samples, TIME_WINDOWS_PER_BATCH)
+                print_ci(f"Throughput:                              ", thr_samples, TIME_WINDOWS_PER_BATCH)
 
             # --- Mitigation ---
             print("\n-- Mitigation Center --")
-            print_ci("Response Time (batch completamenti)      ", center.completed_jobs, BATCH_SIZE)
+            print_ci("Response Time:                           ", center.completed_jobs, BATCH_SIZE)
             util_samples, thr_samples = window_util_thr(center.busy_periods,
                                                         center.completion_times,
                                                         TIME_WINDOW, now)
@@ -201,28 +202,15 @@ class DDoSSystem:
         print("==== END OF REPORT ====")
 
 
-def choose_mode():
-    print("Scegli la modalità:")
-    print("1. Verifica (distribuzioni esponenziali)")
-    print("2. Simulazione standard (distribuzioni iperesponenziali)")
-    choice = input("Inserisci 1 o 2: ").strip()
-    if choice == "1":
-        return "verification"
-    elif choice == "2":
-        return "standard"
-    else:
-        print("Scelta non valida. Default: standard.")
-        return "standard"
-
-
-def run_sim():
-    mode = choose_mode()
-    print(f"\nModalità selezionata: {mode.upper()}")
+def run_verification():
     env = simpy.Environment()
-    system = DDoSSystem(env, mode)
+    system = DDoSSystem(env, "verification")
     env.run()
     system.report()
 
 
-if __name__ == "__main__":
-    run_sim()
+def run_standard():
+    env = simpy.Environment()
+    system = DDoSSystem(env, "standard")
+    env.run()
+    system.report()

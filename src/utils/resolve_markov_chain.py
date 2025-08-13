@@ -270,7 +270,7 @@ class DDoSMarkovChain:
     def print_comparison(self, metrics, simulation_data):
         """Confronta i risultati analitici con la simulazione (ora include il Mitigation)."""
         print("\n" + "="*60)
-        print("CONFRONTO RISULTATI: ANALITICO vs SIMULAZIONE")
+        print("CONFRONTO RISULTATI: MODELLO ANALITICO")
         print("="*60)
 
         # Dati simulazione (metti i tuoi valori reali qui)
