@@ -1,6 +1,6 @@
 import sys
 from controller.verification_run import run_simulation
-from controller.validation import run_validation
+from engineering.costants import *
 
 from library.rngs import plantSeeds
 from engineering.costants import RNG_SEED_VERIFICATION, RNG_SEED_STANDARD
@@ -25,9 +25,9 @@ def choose_mode():
         return "validation"
     elif choice == "4":
         sys.exit()
-    else:
-        print("Scelta non valida. Default: standard.")
-        return "standard"
+    # else:
+    #     print("Scelta non valida. Default: standard.")
+    #     return "standard"
 
 
 def run_sim():
@@ -43,15 +43,17 @@ def run_sim():
             plantSeeds(RNG_SEED_STANDARD)
 
         if mode == "verification":
-            run_simulation("verification", batch_means=True)
+            run_simulation("x1", "verification", batch_means=True)
         elif mode == "standard":
-            run_simulation("standard", batch_means=True)
+            run_simulation("x1","standard", batch_means=True)
         elif mode == "single":
-            run_simulation("standard", batch_means=False)
-        # elif mode == "validation":
-        #     run_validation()
-        # else:
-        #     run_standard()
+            run_simulation("x1","standard", batch_means=False)
+        elif mode == "validation":
+            run_simulation("x1","standard", batch_means=True)
+            run_simulation("x2", "standard", batch_means=True, arrival_p=ARRIVAL_P, arrival_l1=ARRIVAL_L1_x2, arrival_l2=ARRIVAL_L2_x2)
+            run_simulation("x5","standard", batch_means=True, arrival_p=ARRIVAL_P, arrival_l1=ARRIVAL_L1_x5, arrival_l2=ARRIVAL_L2_x5)
+            run_simulation("x10","standard", batch_means=True, arrival_p=ARRIVAL_P, arrival_l1=ARRIVAL_L1_x10, arrival_l2=ARRIVAL_L2_x10)
+            run_simulation("x40","standard", batch_means=True, arrival_p=ARRIVAL_P, arrival_l1=ARRIVAL_L1_x40, arrival_l2=ARRIVAL_L2_x40)
 
 
 if __name__ == "__main__":
