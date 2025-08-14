@@ -188,55 +188,55 @@ def main():
                     "Total Throughput vs λ",
                     os.path.join(outdir, "total_throughput_vs_lambda.png"))
 
-    # 3c) Web Share
-    if np.isfinite(quota_web_bm).sum() >= 2:
-        plot_series(
-            lam_theory,
-            quota_web_bm,
-            "λ (jobs/s)",
-            "Web share (X_web / X_tot)",
-            "Web Share vs λ",
-            os.path.join(outdir, "web_share_vs_lambda.png")
-        )
-    else:
-        plot_series(
-            lam_theory,
-            quota_web_global,
-            "λ (jobs/s)",
-            "Web share (X_web / X_tot)",
-            "Web Share vs λ",
-            os.path.join(outdir, "web_share_vs_lambda.png")
-        )
+    # # 3c) Web Share
+    # if np.isfinite(quota_web_bm).sum() >= 2:
+    #     plot_series(
+    #         lam_theory,
+    #         quota_web_bm,
+    #         "λ (jobs/s)",
+    #         "Web share (X_web / X_tot)",
+    #         "Web Share vs λ",
+    #         os.path.join(outdir, "web_share_vs_lambda.png")
+    #     )
+    # else:
+    #     plot_series(
+    #         lam_theory,
+    #         quota_web_global,
+    #         "λ (jobs/s)",
+    #         "Web share (X_web / X_tot)",
+    #         "Web Share vs λ",
+    #         os.path.join(outdir, "web_share_vs_lambda.png")
+    #     )
 
     # 4) Efficiency vs λ_sim (misurata vs attesa)
-    with np.errstate(invalid='ignore', divide='ignore'):
-        plt.figure()
-        eff_meas = np.where(lam_sim > 0, (web_thr + spk_thr) / lam_sim, np.nan)
-        eff_exp  = np.where(lam_sim > 0, 1.0 - (drop_fp + drop_full) / lam_sim, np.nan)
-        plt.plot(lam_sim, eff_meas, marker='o', label='Measured X_tot / λ_sim')
-        plt.plot(lam_sim, eff_exp,  marker='o', linestyle='--', label='Expected 1 - drops/λ_sim')
-        plt.xlabel("λ_sim (jobs/s)")
-        plt.ylabel("Efficiency")
-        plt.title("System Efficiency vs λ_sim")
-        plt.grid(True, which="both", linestyle="--", alpha=0.4)
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(os.path.join(outdir, "efficiency_vs_lambda.png"), dpi=150)
-        plt.close()
+    # with np.errstate(invalid='ignore', divide='ignore'):
+    #     plt.figure()
+    #     eff_meas = np.where(lam_sim > 0, (web_thr + spk_thr) / lam_sim, np.nan)
+    #     eff_exp  = np.where(lam_sim > 0, 1.0 - (drop_fp + drop_full) / lam_sim, np.nan)
+    #     plt.plot(lam_sim, eff_meas, marker='o', label='Measured X_tot / λ_sim')
+    #     plt.plot(lam_sim, eff_exp,  marker='o', linestyle='--', label='Expected 1 - drops/λ_sim')
+    #     plt.xlabel("λ_sim (jobs/s)")
+    #     plt.ylabel("Efficiency")
+    #     plt.title("System Efficiency vs λ_sim")
+    #     plt.grid(True, which="both", linestyle="--", alpha=0.4)
+    #     plt.legend()
+    #     plt.tight_layout()
+    #     plt.savefig(os.path.join(outdir, "efficiency_vs_lambda.png"), dpi=150)
+    #     plt.close()
 
     # 5) μ̂_web = X_web / ρ_web (preferisci BM se disponibile)
-    mu_hat_web_pref = np.where(np.isfinite(mu_hat_web_bm), mu_hat_web_bm, mu_hat_web_plain)
-    plot_series(lam_theory, mu_hat_web_pref, "λ (jobs/s)", "μ̂_web (jobs/s)",
-                "Estimated Web Capacity μ̂ vs λ",
-                os.path.join(outdir, "web_mu_hat_vs_lambda.png"))
+    # mu_hat_web_pref = np.where(np.isfinite(mu_hat_web_bm), mu_hat_web_bm, mu_hat_web_plain)
+    # plot_series(lam_theory, mu_hat_web_pref, "λ (jobs/s)", "μ̂_web (jobs/s)",
+    #             "Estimated Web Capacity μ̂ vs λ",
+    #             os.path.join(outdir, "web_mu_hat_vs_lambda.png"))
 
     # Tabella riassuntiva (anche valori BM se presenti)
-    print("\nλ_theory\tλ_sim\tX_web\tX_spike\tX_tot\tX_tot_bm\teta_meas\teta_exp\tmu_hat_web")
+    print("\nλ_theory\tλ_sim\tX_web\tX_spike\tX_tot\tX_tot_bm\teta_meas\teta_exp")
     for i in range(len(lam_theory)):
         def f(z): return f"{z:.6f}" if np.isfinite(z) else "nan"
         print(f"{f(lam_theory[i])}\t{f(lam_sim[i])}\t{f(web_thr[i])}\t{f(spk_thr[i])}\t"
               f"{f(X_tot[i])}\t{f(X_tot_bm_m[i])}\t{f(efficiency_meas[i])}\t"
-              f"{f(efficiency_exp[i])}\t{f(mu_hat_web_pref[i])}")
+              f"{f(efficiency_exp[i])}")
 
     print(f"\nGrafici generati nella cartella: {outdir}")
 

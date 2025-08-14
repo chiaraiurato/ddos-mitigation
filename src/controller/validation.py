@@ -13,7 +13,6 @@ from engineering.statistics import batch_means, window_util_thr
 
 
 # Scenari di default se non presenti in engineering.costants.VALIDATION_SCENARIOS
-# Scenari di default se non presenti in engineering.costants.VALIDATION_SCENARIOS
 _DEFAULT_VALIDATION_SCENARIOS = [
     ("x1",      0.03033,    0.4044,     12.9289),
     ("x2",      0.03033,    0.8088,     35.9778),

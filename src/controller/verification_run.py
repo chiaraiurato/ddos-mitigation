@@ -2,27 +2,29 @@ import simpy
 import numpy as np
 from library.rngs import random
 from scipy.stats import t
-
+from engineering.costants import MAX_SPIKE_NUMBER
 from engineering.costants import *
 from engineering.distributions import get_interarrival_time
 from engineering.statistics import batch_means, window_util_thr
+from utils.csv_writer import append_row
 from model.job import Job
 from model.processor_sharing_server import ProcessorSharingServer
 from model.mitigation_manager import MitigationManager
 
 
 class DDoSSystem:
-    def __init__(self, env, mode):
+    def __init__(self, env, mode, enable_ci=False):
         self.env = env
         self.mode = mode
+        self.enable_ci = enable_ci
         self.web_server = ProcessorSharingServer(env, "Web")
         self.spike_servers = [ProcessorSharingServer(env, "Spike-0")]
 
-        if self.mode == "verification":
-            self.batch_count = 0
-            self.completed_in_batch = 0
-            self.sum_rt_in_batch = 0.0
-            self.batch_means = []
+        # if self.mode == "verification":
+        #     self.batch_count = 0
+        #     self.completed_in_batch = 0
+        #     self.sum_rt_in_batch = 0.0
+        #     self.batch_means = []
 
         # Metriche globali
         self.metrics = {
@@ -41,12 +43,12 @@ class DDoSSystem:
         self.env.process(self.arrival_process(mode))
 
     def arrival_process(self, mode):
-        # In 'validation' useremo la stessa logica della 'standard' (gestita in validation_run)
+        
         if mode == "verification":
             arrivals = N_ARRIVALS_VERIFICATION
             interarrival_mode = "verification"
         else:  # "standard"
-            arrivals = N_ARRIVALS  # assicurati che esista in constants (oppure rinomina in N_ARRIVALS_STANDARD)
+            arrivals = N_ARRIVALS 
             interarrival_mode = "standard"
 
         while self.metrics["total_arrivals"] < arrivals:
@@ -86,6 +88,66 @@ class DDoSSystem:
         std_err = np.std(data, ddof=1) / np.sqrt(n)
         ci = t.ppf((1 + confidence) / 2., n - 1) * std_err
         return mean, ci
+    
+    def make_csv_row(self, scenario: str, arrival_p: float, arrival_l1: float, arrival_l2: float):
+        """
+        Costruisce la riga CSV con i dati della simulazione corrente.
+        """
+        now = self.env.now
+        total = max(1, self.metrics["total_arrivals"])  
+
+        # --- Web ---
+        web_util = self.web_server.busy_time / now if now > 0 else 0.0
+        web_rt_mean = float(np.mean(self.web_server.completed_jobs)) if self.web_server.completed_jobs else ""
+        web_throughput = self.web_server.total_completions / now if now > 0 else 0.0
+
+        # --- Mitigation ---
+        center = self.mitigation_manager.center
+        mit_util = center.busy_time / now if now > 0 else 0.0
+        mit_rt_mean = float(np.mean(center.completed_jobs)) if center.completed_jobs else ""
+        mit_throughput = center.total_completions / now if now > 0 else 0.0
+
+        # --- Drop rates ---
+        drop_fp_rate = self.metrics.get("false_positives", 0) / total
+        drop_full_rate = self.metrics.get("discarded_mitigation", 0) / total
+
+        # Base row 
+        row = {
+            "scenario": scenario,
+            "ARRIVAL_P": float(arrival_p),
+            "ARRIVAL_L1": float(arrival_l1),
+            "ARRIVAL_L2": float(arrival_l2),
+            "total_time": float(now),
+            "total_arrivals": int(self.metrics["total_arrivals"]),
+            "web_util": float(web_util),
+            "web_rt_mean": web_rt_mean,
+            "web_throughput": float(web_throughput),
+            "mit_util": float(mit_util),
+            "mit_rt_mean": mit_rt_mean,
+            "mit_throughput": float(mit_throughput),
+            "drop_fp_rate": float(drop_fp_rate),
+            "drop_full_rate": float(drop_full_rate),
+            "spikes_count": int(len(self.spike_servers)),
+        }
+
+        # --- per-spike (fino a MAX_SPIKE_NUMBER) ---
+        for i in range(MAX_SPIKE_NUMBER):
+            if i < len(self.spike_servers):
+                s = self.spike_servers[i]
+                util_i = s.busy_time / now if now > 0 else 0.0
+                rt_i = float(np.mean(s.completed_jobs)) if s.completed_jobs else ""
+                thr_i = s.total_completions / now if now > 0 else 0.0
+                comp_i = int(s.total_completions)
+                row[f"spike{i}_util"] = float(util_i)
+                row[f"spike{i}_rt_mean"] = rt_i
+                row[f"spike{i}_throughput"] = float(thr_i)
+                row[f"spike{i}_completions"] = comp_i
+            else:
+                row[f"spike{i}_util"] = ""
+                row[f"spike{i}_rt_mean"] = ""
+                row[f"spike{i}_throughput"] = ""
+                row[f"spike{i}_completions"] = ""
+        return row
 
     def report(self):
         now = self.env.now
@@ -165,8 +227,8 @@ class DDoSSystem:
         print(f"False positives legal (dropped by classification): {false_positive_legal}, ({percent(false_positive_legal):.2f}%)")
         print(f"Mitigation Discarded (queue full): {self.metrics.get('discarded_mitigation', 0)}")
 
-        # === CI (solo in verification) ===
-        if self.mode == "verification":
+        # === CI  ===
+        if self.enable_ci:
             print("\n======== INTERVALLI DI CONFIDENZA ========")
 
             # --- Web ---
@@ -202,15 +264,29 @@ class DDoSSystem:
         print("==== END OF REPORT ====")
 
 
-def run_verification():
-    env = simpy.Environment()
-    system = DDoSSystem(env, "verification")
-    env.run()
-    system.report()
+# def run_verification():
+#     env = simpy.Environment()
+#     system = DDoSSystem(env, "verification")
+#     env.run()
+#     system.report()
 
 
-def run_standard():
+# def run_standard():
+#     env = simpy.Environment()
+#     system = DDoSSystem(env, "standard")
+#     env.run()
+#     system.report()
+
+def run_simulation(mode: str, batch_means: bool):
+    """
+    Esegue una singola simulazione in 'mode' ('verification'|'standard')
+    e stampa i CI con il metodo Batch Means (idfStudent).
+    """
+    if mode not in ("verification", "standard"):
+        raise ValueError("mode must be 'verification' or 'standard'")
     env = simpy.Environment()
-    system = DDoSSystem(env, "standard")
+    system = DDoSSystem(env, mode, enable_ci=batch_means)
     env.run()
     system.report()
+    row = system.make_csv_row("x1", ARRIVAL_P, ARRIVAL_L1, ARRIVAL_L2)
+    append_row("results_standard.csv", row)

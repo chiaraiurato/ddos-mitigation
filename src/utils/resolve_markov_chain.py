@@ -273,7 +273,7 @@ class DDoSMarkovChain:
         print("CONFRONTO RISULTATI: MODELLO ANALITICO")
         print("="*60)
 
-        # Dati simulazione (metti i tuoi valori reali qui)
+        # Dati simulazione 
         sim_web_completions = 59215
         sim_spike_completions = 4728
         sim_fp_dropped = 685
@@ -324,7 +324,7 @@ def main():
     print("Avvio risoluzione catena di Markov per DDoS Mitigation System...")
     start_time = time.time()
     
-    # Crea il modello
+    
     markov = DDoSMarkovChain()
     
     # Costruisce la matrice generatrice

@@ -15,3 +15,5 @@ def get_service_time(mode):
         return Exponential(0.16)  # 1 / 6.25
     else:
         return Hyperexponential(SERVICE_P, SERVICE_L1, SERVICE_L2)
+    
+

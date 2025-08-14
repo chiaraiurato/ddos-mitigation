@@ -1,59 +1,68 @@
 import numpy as np
-from scipy.stats import t
+from library.rvms import idfStudent
+from engineering.costants import BATCH_SIZE, N_BATCH, CONFIDENCE_LEVEL
 
-def batch_means(data, batch_size):
+def _make_batches(data, b, k_max=None):
     n = len(data)
-    if n < batch_size:
-        raise ValueError("Not enough data for batch means")
+    if n < b:
+        raise ValueError(f"Not enough data for batch means: n={n} < b={b}")
+    k = n // b
+    if k_max is not None:
+        k = min(k, k_max)
+    if k < 2:
+        raise ValueError(f"Need at least 2 batches, got k={k} (n={n}, b={b}).")
 
-    k = n // batch_size  # numero di batch interi
-    batches = np.array_split(data[:k * batch_size], k)
-    means = np.array([np.mean(b) for b in batches])
+    trimmed = np.asarray(data[:k * b], dtype=float)
+    batches = np.array_split(trimmed, k)     
+    means = np.array([np.mean(bi) for bi in batches], dtype=float)
+    return means, k
 
-    mean = np.mean(means)
-    std_err = np.std(means, ddof=1) / np.sqrt(k)
-    ci_half_width = t.ppf(0.975, df=k - 1) * std_err
+def batch_means(data, batch_size=None, n_batches=None, confidence=None):
+    """
+    Algoritmo (Batch Means):
+      - b = batch_size (default: BATCH_SIZE)
+      - k <= n_batches (default: N_BATCH)
+      - livello di confidenza (default: CONFIDENCE_LEVEL)
+    Ritorna: (xbar, half_width)
+    """
+    if batch_size is None:
+        batch_size = BATCH_SIZE
+    if n_batches is None:
+        n_batches = N_BATCH
+    if confidence is None:
+        confidence = CONFIDENCE_LEVEL
 
-    return mean, ci_half_width
+    means, k = _make_batches(data, batch_size, k_max=n_batches)
+
+    xbar = float(np.mean(means))
+    s = float(np.std(means, ddof=1))
+    alpha = 1.0 - float(confidence)
+    u = 1.0 - alpha / 2.0
+    t_star = float(idfStudent(k - 1, u))
+    half_width = t_star * (s / np.sqrt(k))
+    return xbar, half_width
 
 def window_util_thr(busy_periods, completion_times, window, now):
-    """
-    Calcola (utilization, throughput) su finestre non sovrapposte di ampiezza `window`
-    nell'intervallo [0, now), usando:
-      - busy_periods: lista di (start, end)
-      - completion_times: lista di tempi assoluti di completamento (monotona crescente non obbligatoria)
-    Ritorna: (util_samples: list[float], thr_samples: list[float])
-    """
     if window <= 0 or now <= 0:
         return [], []
-
     nwin = int(now // window)
     if nwin <= 0:
         return [], []
 
-    util_samples = []
-    thr_samples = []
-
-    comp = completion_times
-    ncomp = len(comp)
-    idx = 0
+    util_samples, thr_samples = [], []
+    comp = sorted(completion_times)
+    ncomp, idx = len(comp), 0
 
     for k in range(nwin):
-        a = k * window
-        b = a + window
+        a, b = k * window, (k + 1) * window
 
-        # Utilization: frazione di tempo busy nella finestra
         busy_in_window = 0.0
         for (s, e) in busy_periods:
             if e <= a or s >= b:
                 continue
-            start = max(s, a)
-            end = min(e, b)
-            if end > start:
-                busy_in_window += end - start
+            busy_in_window += max(0.0, min(e, b) - max(s, a))
         util_samples.append(busy_in_window / window)
 
-        # Throughput: completamenti in [a,b) / window
         count = 0
         while idx < ncomp and comp[idx] < b:
             if comp[idx] >= a:
