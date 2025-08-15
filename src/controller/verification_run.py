@@ -1,7 +1,7 @@
 import simpy
 import numpy as np
 import os
-from library.rngs import random, plantSeeds
+from library.rngs import random, plantSeeds, getSeed, selectStream
 from engineering.costants import *
 from engineering.distributions import get_interarrival_time
 from engineering.statistics import batch_means, window_util_thr
@@ -381,12 +381,7 @@ def transitory_fieldnames(max_spikes: int):
     return base
 
 
-def run_transitory_sim(
-        mode: str,
-        batch_means: bool,
-        scenario: str = "transitory",
-        out_csv: str = "plot/results_transitory.csv",
-    ):
+def run_finite_sim(mode: str, batch_means: bool, scenario: str, out_csv: str):
     # rimuovi il file per evitare header “vecchi”
     if os.path.exists(out_csv):
         os.remove(out_csv)
@@ -397,42 +392,90 @@ def run_transitory_sim(
 
     # fieldnames stabili per tutto il run
     fieldnames = transitory_fieldnames(MAX_SPIKE_NUMBER)
-
+    
     all_logs = []
-    for rep in range(REPLICATION_FACTOR):
-        seed = SEEDS[rep % len(SEEDS)]
-        plantSeeds(seed)
 
-        env = simpy.Environment()
-        system = DDoSSystem(env, mode, arrival_p, arrival_l1, arrival_l2,
-                            enable_ci=batch_means)
+    if mode == "transitory":
 
-        def checkpointer(env, system, rep_id):
-            next_cp = CHECKPOINT_TIME
-            while next_cp <= STOP_CONDITION:
-                yield env.timeout(next_cp - env.now)
-                snap = system.snapshot(env.now, replica_id=rep_id)
-                # metadati sempre presenti
-                snap["scenario"] = scenario
-                snap["mode"] = mode
-                snap["is_final"] = False
+        for rep in range(REPLICATION_FACTOR_TRANSITORY):
+            seed = SEEDS_TRANSITORY[rep % len(SEEDS_TRANSITORY)]
+            plantSeeds(seed)
 
-                all_logs.append(snap)
-                append_row_stable(out_csv, snap, fieldnames)  # <--- usa lo scrittore stabile
-                next_cp += CHECKPOINT_TIME
+            env = simpy.Environment()
+            system = DDoSSystem(env, mode, arrival_p, arrival_l1, arrival_l2,
+                                enable_ci=batch_means)
 
-            # Ultimo snapshot esatto al termine
-            if env.now < STOP_CONDITION:
-                yield env.timeout(STOP_CONDITION - env.now)
-                snap = system.snapshot(env.now, replica_id=rep_id)
-                snap["scenario"] = scenario
-                snap["mode"] = mode
-                snap["is_final"] = True
+            def checkpointer(env, system, rep_id):
+                next_cp = CHECKPOINT_TIME_TRANSITORY
+                while next_cp <= STOP_CONDITION_TRANSOTORY:
+                    yield env.timeout(next_cp - env.now)
+                    snap = system.snapshot(env.now, replica_id=rep_id)
+                    # metadati sempre presenti
+                    snap["scenario"] = scenario
+                    snap["mode"] = mode
+                    snap["is_final"] = False
 
-                all_logs.append(snap)
-                append_row_stable(out_csv, snap, fieldnames)
+                    all_logs.append(snap)
+                    append_row_stable(out_csv, snap, fieldnames)  # <--- usa lo scrittore stabile
+                    next_cp += CHECKPOINT_TIME_TRANSITORY
 
-        env.process(checkpointer(env, system, rep))
-        env.run(until=STOP_CONDITION)
+                # Ultimo snapshot esatto al termine
+                if env.now < STOP_CONDITION_TRANSOTORY:
+                    yield env.timeout(STOP_CONDITION_TRANSOTORY - env.now)
+                    snap = system.snapshot(env.now, replica_id=rep_id)
+                    snap["scenario"] = scenario
+                    snap["mode"] = mode
+                    snap["is_final"] = True
 
+                    all_logs.append(snap)
+                    append_row_stable(out_csv, snap, fieldnames)
+
+            env.process(checkpointer(env, system, rep))
+            env.run(until=STOP_CONDITION_TRANSOTORY)
+        
+    elif mode == "finite simulation":
+            
+            seeds = []
+            seeds.append(1234566789)
+
+            for rep in range(REPLICATION_FACTORY_FINITE_SIMULATION):
+                
+                plantSeeds(seeds[rep])
+                
+                env = simpy.Environment()
+                system = DDoSSystem(env, mode, arrival_p, arrival_l1, arrival_l2,
+                                    enable_ci=batch_means)
+
+                def checkpointer(env, system, rep_id):
+                    next_cp = CHECKPOINT_TIME_FINITE_SIMULATION
+                    while next_cp <= STOP_CONDITION_FINITE_SIMULATION:
+                        yield env.timeout(next_cp - env.now)
+                        snap = system.snapshot(env.now, replica_id=rep_id)
+                        # metadati sempre presenti
+                        snap["scenario"] = scenario
+                        snap["mode"] = mode
+                        snap["is_final"] = False
+
+                        all_logs.append(snap)
+                        append_row_stable(out_csv, snap, fieldnames)  # <--- usa lo scrittore stabile
+                        next_cp += CHECKPOINT_TIME_FINITE_SIMULATION
+
+                    # Ultimo snapshot esatto al termine
+                    if env.now < STOP_CONDITION_FINITE_SIMULATION:
+                        yield env.timeout(STOP_CONDITION_FINITE_SIMULATION - env.now)
+                        snap = system.snapshot(env.now, replica_id=rep_id)
+                        snap["scenario"] = scenario
+                        snap["mode"] = mode
+                        snap["is_final"] = True
+
+                        all_logs.append(snap)
+                        append_row_stable(out_csv, snap, fieldnames)
+
+                env.process(checkpointer(env, system, rep))
+                env.run(until=STOP_CONDITION_FINITE_SIMULATION)
+
+                selectStream(RNG_STREAM)
+                seeds.append(getSeed())
+
+    
     return all_logs

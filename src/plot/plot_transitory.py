@@ -3,9 +3,6 @@
 """
 Grafici Analisi del Transitorio: SOLO spaghetti plot per scenario (niente medie).
 Salva i PNG in ./transitory/.
-
-Esempio:
-  python plot_transitory.py --csv results_transitory.csv --time-unit day --vline 200000
 """
 
 import argparse
@@ -139,5 +136,6 @@ def main():
 
     print(f"[OK] Grafici salvati in: {outdir.resolve()}")
 
+# python plot_transitory.py --csv results_transitory.csv --time-unit day --vline 200000
 if __name__ == "__main__":
     main()

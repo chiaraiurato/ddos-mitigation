@@ -1,5 +1,5 @@
 import sys
-from controller.verification_run import run_simulation, run_transitory_sim
+from controller.verification_run import run_simulation, run_finite_sim
 from engineering.costants import *
 
 from library.rngs import plantSeeds
@@ -14,7 +14,9 @@ def choose_mode():
     print("2. Simulazione standard (distribuzioni iperesponenziali)")
     print("3. Validation (sweep ARRIVAL_P/L1/L2 e salvataggio CSV)")
     print("4. Analisi del Transitorio")
-    print("5. Esci")
+    print("5. Analisi ad Orizzonte Finito")
+    print("6. Analisi ad Orizzonte Infinito")
+    print("7. Esci")
     choice = input("Inserisci: ").strip()
     if choice == "0":
         return "single" 
@@ -27,6 +29,10 @@ def choose_mode():
     elif choice == "4":
         return "transitory"
     elif choice == "5":
+        return "finite simulation"
+    elif choice == "6":
+        return "infinite simulation"
+    elif choice == "7":
         sys.exit()
     # else:
     #     print("Scelta non valida. Default: standard.")
@@ -67,15 +73,29 @@ def run_sim():
         
         elif mode == "transitory":
 
-            logs = run_transitory_sim("transitory", batch_means=False,
+            logs = run_finite_sim("transitory", batch_means=False,
                               scenario="transitory_x40",
                               out_csv="plot/results_transitory.csv")
             
             # for r in logs[:5]:
             #     print(r)
             
-            print(f"\n[OK] Log del transitorio salvati in: results_transitory.csv")
+            print(f"\n[OK] Log del transitorio salvati in: plot/results_transitory.csv")
 
+        elif mode == "finite simulation":
+            
+            logs = run_finite_sim("finite simulation", batch_means=False,
+                              scenario="finite simulation",
+                              out_csv="plot/results_finite_simulation.csv")
+            
+            # for r in logs[:5]:
+            #     print(r)
+            
+            print(f"\n[OK] Log salvati in: plot/results_finite_simulation.csv")
+
+        elif mode == "infinite simulation":
+
+            print("TODO")
 
 if __name__ == "__main__":
     run_sim()
