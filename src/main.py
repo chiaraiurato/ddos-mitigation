@@ -1,5 +1,5 @@
 import sys
-from controller.verification_run import run_simulation
+from controller.verification_run import run_simulation, run_transitory_sim
 from engineering.costants import *
 
 from library.rngs import plantSeeds
@@ -13,7 +13,8 @@ def choose_mode():
     print("1. Verifica (distribuzioni esponenziali)")
     print("2. Simulazione standard (distribuzioni iperesponenziali)")
     print("3. Validation (sweep ARRIVAL_P/L1/L2 e salvataggio CSV)")
-    print("4. Esci")
+    print("4. Analisi del Transitorio")
+    print("5. Esci")
     choice = input("Inserisci: ").strip()
     if choice == "0":
         return "single" 
@@ -24,6 +25,8 @@ def choose_mode():
     elif choice == "3":
         return "validation"
     elif choice == "4":
+        return "transitory"
+    elif choice == "5":
         sys.exit()
     # else:
     #     print("Scelta non valida. Default: standard.")
@@ -43,17 +46,35 @@ def run_sim():
             plantSeeds(RNG_SEED_STANDARD)
 
         if mode == "verification":
+        
             run_simulation("x1", "verification", batch_means=True)
+        
         elif mode == "standard":
+        
             run_simulation("x1","standard", batch_means=True)
+        
         elif mode == "single":
+        
             run_simulation("x1","standard", batch_means=False)
+        
         elif mode == "validation":
+        
             run_simulation("x1","standard", batch_means=True)
             run_simulation("x2", "standard", batch_means=True, arrival_p=ARRIVAL_P, arrival_l1=ARRIVAL_L1_x2, arrival_l2=ARRIVAL_L2_x2)
             run_simulation("x5","standard", batch_means=True, arrival_p=ARRIVAL_P, arrival_l1=ARRIVAL_L1_x5, arrival_l2=ARRIVAL_L2_x5)
             run_simulation("x10","standard", batch_means=True, arrival_p=ARRIVAL_P, arrival_l1=ARRIVAL_L1_x10, arrival_l2=ARRIVAL_L2_x10)
             run_simulation("x40","standard", batch_means=True, arrival_p=ARRIVAL_P, arrival_l1=ARRIVAL_L1_x40, arrival_l2=ARRIVAL_L2_x40)
+        
+        elif mode == "transitory":
+
+            logs = run_transitory_sim("transitory", batch_means=False,
+                              scenario="transitory_x40",
+                              out_csv="plot/results_transitory.csv")
+            
+            # for r in logs[:5]:
+            #     print(r)
+            
+            print(f"\n[OK] Log del transitorio salvati in: results_transitory.csv")
 
 
 if __name__ == "__main__":

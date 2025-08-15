@@ -32,3 +32,19 @@ def append_row(csv_path: str, row: dict):
         if new_file:
             w.writeheader()
         w.writerow(row)
+
+
+def append_row_stable(path: str, row: dict, fieldnames: list):
+    """
+    Scrive una riga su CSV usando fieldnames stabili.
+    - Se il file non esiste, scrive l'header.
+    - Filtra le chiavi extra e riempie i missing con "".
+    """
+    exists = os.path.exists(path)
+    # Prepara la riga allineata alle fieldnames
+    safe_row = {k: row.get(k, "") for k in fieldnames}
+    with open(path, "a", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames)
+        if not exists:
+            w.writeheader()
+        w.writerow(safe_row)

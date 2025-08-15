@@ -1,8 +1,7 @@
 import simpy
 import numpy as np
-from library.rngs import random
-from scipy.stats import t
-from engineering.costants import MAX_SPIKE_NUMBER
+import os
+from library.rngs import random, plantSeeds
 from engineering.costants import *
 from engineering.distributions import get_interarrival_time
 from engineering.statistics import batch_means, window_util_thr
@@ -10,7 +9,8 @@ from utils.csv_writer import append_row
 from model.job import Job
 from model.processor_sharing_server import ProcessorSharingServer
 from model.mitigation_manager import MitigationManager
-
+from utils.checkpoint import _rt_mean_upto, _count_upto, _utilization_upto, _throughput_upto
+from utils.csv_writer import append_row_stable
 
 class DDoSSystem:
     def __init__(self, env, mode, arrival_p, arrival_l1, arrival_l2, enable_ci=False):
@@ -20,16 +20,10 @@ class DDoSSystem:
         self.arrival_p = arrival_p
         self.arrival_l1 = arrival_l1
         self.arrival_l2 = arrival_l2
+
         self.web_server = ProcessorSharingServer(env, "Web")
         self.spike_servers = [ProcessorSharingServer(env, "Spike-0")]
         
-
-        # if self.mode == "verification":
-        #     self.batch_count = 0
-        #     self.completed_in_batch = 0
-        #     self.sum_rt_in_batch = 0.0
-        #     self.batch_means = []
-
         # Metriche globali
         self.metrics = {
             "mitigation_completions": 0,
@@ -46,29 +40,98 @@ class DDoSSystem:
 
         self.env.process(self.arrival_process(mode))
 
+    def snapshot(self, when, replica_id=None):
+        """
+        Ritorna un dict con le metriche cumulative (RT mean, Util, Thr)
+        calcolate FINO al tempo 'when' per Web, Mitigation e Spike i.
+        """
+        # Assicurati che gli stati 'busy' siano aggiornati al tempo 'when'
+        self.web_server.update(when)
+        for s in self.spike_servers:
+            s.update(when)
+        center = self.mitigation_manager.center
+        center.update(when)
+
+        row = {
+            "replica": int(replica_id) if replica_id is not None else None,
+            "time": float(when),
+
+            # Web
+            "web_rt_mean": _rt_mean_upto(self.web_server.completed_jobs,
+                                         self.web_server.completion_times, when),
+            "web_util": _utilization_upto(self.web_server.busy_periods, when),
+            "web_throughput": _throughput_upto(self.web_server.completion_times, when),
+
+            # Mitigation
+            "mit_rt_mean": _rt_mean_upto(center.completed_jobs,
+                                         center.completion_times, when),
+            "mit_util": _utilization_upto(center.busy_periods, when),
+            "mit_throughput": _throughput_upto(center.completion_times, when),
+
+            # Global counters cumulativi fino a 'when' (per completezza)
+            "arrivals_so_far": int(min(self.metrics["total_arrivals"], 
+                                       self.metrics["total_arrivals"])),  # già cumulativi
+            "false_positives_so_far": int(self.metrics.get("false_positives", 0)),
+            "mitigation_completions_so_far": int(self.metrics.get("mitigation_completions", 0)),
+            "spikes_count": int(len(self.spike_servers)),
+        }
+
+        # Per-spike
+        for i in range(len(self.spike_servers)):
+            s = self.spike_servers[i]
+            row[f"spike{i}_rt_mean"] = _rt_mean_upto(s.completed_jobs, s.completion_times, when)
+            row[f"spike{i}_util"]    = _utilization_upto(s.busy_periods, when)
+            row[f"spike{i}_throughput"] = _throughput_upto(s.completion_times, when)
+
+        # Se vuoi colonne fisse fino a MAX_SPIKE_NUMBER:
+        for i in range(len(self.spike_servers), MAX_SPIKE_NUMBER):
+            row[f"spike{i}_rt_mean"] = None
+            row[f"spike{i}_util"] = None
+            row[f"spike{i}_throughput"] = None
+
+        return row
+
     def arrival_process(self, mode):
-        
+
         if mode == "verification":
             arrivals = N_ARRIVALS_VERIFICATION
             interarrival_mode = "verification"
+        elif mode == "transitory":
+            interarrival_mode = "standard"
         else:  # "standard"
             arrivals = N_ARRIVALS 
             interarrival_mode = "standard"
 
-        while self.metrics["total_arrivals"] < arrivals:
-            interarrival_time = get_interarrival_time(interarrival_mode, self.arrival_p, self.arrival_l1, self.arrival_l2)
-            yield self.env.timeout(interarrival_time)
+        if mode == "transitory":
+            while True:
+                interarrival_time = get_interarrival_time(interarrival_mode, self.arrival_p, self.arrival_l1, self.arrival_l2)
+                yield self.env.timeout(interarrival_time)
 
-            self.metrics["total_arrivals"] += 1
-            arrival_time = self.env.now
-            is_legal = random() < P_LECITO
-            if is_legal:
-                self.metrics["legal_arrivals"] += 1
-            else:
-                self.metrics["illegal_arrivals"] += 1
+                self.metrics["total_arrivals"] += 1
+                arrival_time = self.env.now
+                is_legal = random() < P_LECITO
+                if is_legal:
+                    self.metrics["legal_arrivals"] += 1
+                else:
+                    self.metrics["illegal_arrivals"] += 1
 
-            job = Job(self.metrics["total_arrivals"], arrival_time, None, is_legal)
-            self.mitigation_manager.handle_job(job)
+                job = Job(self.metrics["total_arrivals"], arrival_time, None, is_legal)
+                self.mitigation_manager.handle_job(job)
+        else:   
+            while self.metrics["total_arrivals"] < arrivals:
+                interarrival_time = get_interarrival_time(interarrival_mode, self.arrival_p, self.arrival_l1, self.arrival_l2)
+                yield self.env.timeout(interarrival_time)
+
+                self.metrics["total_arrivals"] += 1
+                arrival_time = self.env.now
+                is_legal = random() < P_LECITO
+                if is_legal:
+                    self.metrics["legal_arrivals"] += 1
+                else:
+                    self.metrics["illegal_arrivals"] += 1
+
+                job = Job(self.metrics["total_arrivals"], arrival_time, None, is_legal)
+                self.mitigation_manager.handle_job(job)
 
     def notify_completion(self, server_name, response_time):
         # Usato solo se imposti self.web_server.set_observer(self)
@@ -83,16 +146,6 @@ class DDoSSystem:
             self.sum_rt_in_batch = 0
             self.batch_count += 1
 
-    # @staticmethod
-    # def direct_ci(data, confidence=0.95):
-    #     n = len(data)
-    #     if n < 2:
-    #         return (np.mean(data) if n == 1 else float('nan')), float('nan')
-    #     mean = np.mean(data)
-    #     std_err = np.std(data, ddof=1) / np.sqrt(n)
-    #     ci = t.ppf((1 + confidence) / 2., n - 1) * std_err
-    #     return mean, ci
-    
     def make_csv_row(self, scenario: str, arrival_p: float, arrival_l1: float, arrival_l2: float):
         """
         Costruisce la riga CSV.
@@ -175,7 +228,6 @@ class DDoSSystem:
                 row[f"spike{i}_throughput_bm"] = ""
                 row[f"spike{i}_completions"]   = ""
         return row
-
 
     def report(self):
         now = self.env.now
@@ -311,3 +363,76 @@ def run_simulation(scenario:str, mode: str, batch_means: bool, arrival_p=None, a
 
     row = system.make_csv_row(scenario, arrival_p, arrival_l1, arrival_l2)
     append_row("results_standard.csv", row)
+
+def transitory_fieldnames(max_spikes: int):
+    base = [
+        "replica", "time",
+        # Web
+        "web_rt_mean", "web_util", "web_throughput",
+        # Mitigation
+        "mit_rt_mean", "mit_util", "mit_throughput",
+        # Contatori globali
+        "arrivals_so_far", "false_positives_so_far", "mitigation_completions_so_far",
+        # Meta
+        "spikes_count", "scenario", "mode", "is_final",
+    ]
+    for i in range(max_spikes):
+        base += [f"spike{i}_rt_mean", f"spike{i}_util", f"spike{i}_throughput"]
+    return base
+
+
+def run_transitory_sim(
+        mode: str,
+        batch_means: bool,
+        scenario: str = "transitory",
+        out_csv: str = "plot/results_transitory.csv",
+    ):
+    # rimuovi il file per evitare header “vecchi”
+    if os.path.exists(out_csv):
+        os.remove(out_csv)
+
+    arrival_p  = ARRIVAL_P
+    arrival_l1 = ARRIVAL_L1_x40
+    arrival_l2 = ARRIVAL_L2_x40
+
+    # fieldnames stabili per tutto il run
+    fieldnames = transitory_fieldnames(MAX_SPIKE_NUMBER)
+
+    all_logs = []
+    for rep in range(REPLICATION_FACTOR):
+        seed = SEEDS[rep % len(SEEDS)]
+        plantSeeds(seed)
+
+        env = simpy.Environment()
+        system = DDoSSystem(env, mode, arrival_p, arrival_l1, arrival_l2,
+                            enable_ci=batch_means)
+
+        def checkpointer(env, system, rep_id):
+            next_cp = CHECKPOINT_TIME
+            while next_cp <= STOP_CONDITION:
+                yield env.timeout(next_cp - env.now)
+                snap = system.snapshot(env.now, replica_id=rep_id)
+                # metadati sempre presenti
+                snap["scenario"] = scenario
+                snap["mode"] = mode
+                snap["is_final"] = False
+
+                all_logs.append(snap)
+                append_row_stable(out_csv, snap, fieldnames)  # <--- usa lo scrittore stabile
+                next_cp += CHECKPOINT_TIME
+
+            # Ultimo snapshot esatto al termine
+            if env.now < STOP_CONDITION:
+                yield env.timeout(STOP_CONDITION - env.now)
+                snap = system.snapshot(env.now, replica_id=rep_id)
+                snap["scenario"] = scenario
+                snap["mode"] = mode
+                snap["is_final"] = True
+
+                all_logs.append(snap)
+                append_row_stable(out_csv, snap, fieldnames)
+
+        env.process(checkpointer(env, system, rep))
+        env.run(until=STOP_CONDITION)
+
+    return all_logs
