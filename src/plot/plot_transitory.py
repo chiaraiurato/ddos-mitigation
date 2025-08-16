@@ -11,7 +11,10 @@ from typing import List, Optional
 
 import pandas as pd
 import matplotlib.pyplot as plt
-from engineering.costants import SEEDS_TRANSITORY
+
+# ==== SEEDS per le legende (scenario-i → SEEDS[i]) ====
+SEEDS = [123456789, 653476254, 734861870, 976578247, 364519872, 984307865, 546274352]
+
 # Colonne attese
 TIME_COL = "time"
 REP_COL  = "replica"
@@ -124,7 +127,7 @@ def main():
     round_time_decimals = None if args.round_time is not None and args.round_time < 0 else args.round_time
 
     # mappa scenario/seed per la legenda
-    label_map = build_label_map(df, SEEDS_TRANSITORY)
+    label_map = build_label_map(df, SEEDS)
 
     # genera SOLO spaghetti plot per scenario
     for metric in metrics:
