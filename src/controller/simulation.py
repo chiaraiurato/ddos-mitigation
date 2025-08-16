@@ -440,7 +440,7 @@ def transitory_fieldnames(max_spikes: int):
         # Mitigation
         "mit_rt_mean", "mit_util", "mit_throughput",
         # Globale
-        "system_rt_mean",  # <<<<<< aggiunta
+        "system_rt_mean",  
         "arrivals_so_far", "false_positives_so_far", "mitigation_completions_so_far",
         # Meta
         "spikes_count", "scenario", "mode", "is_final",
@@ -478,33 +478,33 @@ def run_finite_sim(mode: str, batch_means: bool, scenario: str, out_csv: str):
             system = DDoSSystem(env, mode, arrival_p, arrival_l1, arrival_l2,
                                 enable_ci=batch_means)
 
-            def checkpointer(env, system, rep_id):
-                next_cp = CHECKPOINT_TRANSITORY
-                while next_cp <= STOP_TRANSITORY:
-                    yield env.timeout(next_cp - env.now)
-                    snap = system.snapshot(env.now, replica_id=rep_id)
-                    # metadati sempre presenti
-                    snap["scenario"] = scenario
-                    snap["mode"] = mode
-                    snap["is_final"] = False
-
-                    all_logs.append(snap)
-                    append_row_stable(out_csv, snap, fieldnames)
-                    next_cp += CHECKPOINT_TRANSITORY
-
-                # Ultimo snapshot esatto al termine
-                if env.now < STOP_TRANSITORY:
-                    yield env.timeout(STOP_TRANSITORY - env.now)
+            def checkpointer_optimized(env, system, rep_id):
+                
+                checkpoint_times = []
+                t = CHECKPOINT_TIME_TRANSITORY
+                while t <= STOP_CONDITION_TRANSITORY:
+                    checkpoint_times.append(t)
+                    t += CHECKPOINT_TIME_TRANSITORY
+                
+                for cp_time in checkpoint_times:
+                    yield env.timeout(cp_time - env.now)
+                    
                     snap = system.snapshot(env.now, replica_id=rep_id)
                     snap["scenario"] = scenario
                     snap["mode"] = mode
-                    snap["is_final"] = True
-
+                    snap["is_final"] = (cp_time == checkpoint_times[-1])
+                    
                     all_logs.append(snap)
                     append_row_stable(out_csv, snap, fieldnames)
-
-            env.process(checkpointer(env, system, rep))
-            env.run(until=STOP_TRANSITORY)
+                    
+                    # Progress indicator
+                    progress = (cp_time / STOP_CONDITION_TRANSITORY) * 100
+                    print(f"  Replica {rep+1}: {progress:.1f}% completato")
+            
+            env.process(checkpointer_optimized(env, system, rep))
+            env.run(until=STOP_CONDITION_TRANSITORY)
+            
+            print(f"Replica {rep+1} completata!")
         
     elif mode == "finite simulation":
         seeds = [1234566789]  # seed iniziale (valido: < MODULUS)

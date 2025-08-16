@@ -1,5 +1,5 @@
 import sys
-from controller.verification_run import run_simulation, run_finite_sim
+from controller.simulation import run_simulation, run_finite_sim
 from engineering.costants import *
 
 from library.rngs import plantSeeds
@@ -12,7 +12,7 @@ def choose_mode():
     print("0. Singola run")
     print("1. Verifica (distribuzioni esponenziali)")
     print("2. Simulazione standard (distribuzioni iperesponenziali)")
-    print("3. Validation (sweep ARRIVAL_P/L1/L2 e salvataggio CSV)")
+    print("3. Validazione")
     print("4. Analisi del Transitorio")
     print("5. Analisi ad Orizzonte Finito")
     print("6. Analisi ad Orizzonte Infinito")
