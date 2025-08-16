@@ -13,7 +13,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # ==== SEEDS per le legende (scenario-i → SEEDS[i]) ====
-SEEDS = [123456789, 653476254, 734861870, 976578247, 364519872]
+SEEDS = [123456789, 653476254, 734861870, 976578247, 364519872, 984307865, 546274352]
 
 # Colonne attese
 TIME_COL = "time"

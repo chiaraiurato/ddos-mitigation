@@ -12,6 +12,28 @@ from model.mitigation_manager import MitigationManager
 from utils.checkpoint import _rt_mean_upto, _count_upto, _utilization_upto, _throughput_upto
 from utils.csv_writer import append_row_stable
 
+# ---------------------------------------------------------------------------
+# Compatibility per refusi nei nomi delle costanti (TRANSOTORY vs TRANSITORY)
+# ---------------------------------------------------------------------------
+# STOP
+try:
+    STOP_TRANSITORY = STOP_CONDITION_TRANSITORY                     # nome corretto
+except NameError:
+    try:
+        STOP_TRANSITORY = STOP_CONDITION_TRANSITORY                 # refuso storico
+    except NameError:
+        STOP_TRANSITORY = STOP_CONDITION_FINITE_SIMULATION          # fallback estremo
+
+# CHECKPOINT
+try:
+    CHECKPOINT_TRANSITORY = CHECKPOINT_TIME_TRANSITORY
+except NameError:
+    try:
+        CHECKPOINT_TRANSITORY = CHECKPOINT_TIME_TRANSITORY          # refuso storico (se presente)
+    except NameError:
+        CHECKPOINT_TRANSITORY = CHECKPOINT_TIME_FINITE_SIMULATION
+
+
 class DDoSSystem:
     def __init__(self, env, mode, arrival_p, arrival_l1, arrival_l2, enable_ci=False):
         self.env = env
@@ -68,9 +90,8 @@ class DDoSSystem:
             "mit_util": _utilization_upto(center.busy_periods, when),
             "mit_throughput": _throughput_upto(center.completion_times, when),
 
-            # Global counters cumulativi fino a 'when' (per completezza)
-            "arrivals_so_far": int(min(self.metrics["total_arrivals"], 
-                                       self.metrics["total_arrivals"])),  # già cumulativi
+            # Global counters cumulativi fino a 'when'
+            "arrivals_so_far": int(self.metrics["total_arrivals"]),
             "false_positives_so_far": int(self.metrics.get("false_positives", 0)),
             "mitigation_completions_so_far": int(self.metrics.get("mitigation_completions", 0)),
             "spikes_count": int(len(self.spike_servers)),
@@ -83,26 +104,71 @@ class DDoSSystem:
             row[f"spike{i}_util"]    = _utilization_upto(s.busy_periods, when)
             row[f"spike{i}_throughput"] = _throughput_upto(s.completion_times, when)
 
-        # Se vuoi colonne fisse fino a MAX_SPIKE_NUMBER:
+        # Colonne fisse fino a MAX_SPIKE_NUMBER
         for i in range(len(self.spike_servers), MAX_SPIKE_NUMBER):
             row[f"spike{i}_rt_mean"] = None
             row[f"spike{i}_util"] = None
             row[f"spike{i}_throughput"] = None
 
+        # --- Quote di lecite/illecite processate e completate (cumulate fino a 'when') ---
+        tot_arr = max(1, self.metrics["total_arrivals"])
+
+        proc_leg   = int(self.metrics.get("processed_legal", 0))
+        proc_illeg = int(self.metrics.get("processed_illegal", 0))
+
+        web_leg    = int(self.web_server.legal_completions)
+        web_illeg  = int(self.web_server.illegal_completions)
+        spike_leg  = sum(int(s.legal_completions)  for s in self.spike_servers)
+        spike_illeg= sum(int(s.illegal_completions) for s in self.spike_servers)
+
+        comp_leg   = web_leg + spike_leg
+        comp_illeg = web_illeg + spike_illeg
+        comp_tot   = max(1, comp_leg + comp_illeg)
+
+        # mix di arrivo già calcolato più sopra se vuoi: illegal_share
+        row["illegal_share"]               = self.metrics["illegal_arrivals"] / tot_arr
+
+        # quote rispetto al TOTALE ARRIVI
+        row["processed_legal_share"]       = proc_leg   / tot_arr
+        row["processed_illegal_share"]     = proc_illeg / tot_arr
+        row["completed_legal_share"]       = comp_leg   / tot_arr
+        row["completed_illegal_share"]     = comp_illeg / tot_arr
+
+        # (opzionale) quote "within completions" (tra i soli completati)
+        row["completed_legal_of_completed_share"]   = comp_leg   / comp_tot
+        row["completed_illegal_of_completed_share"] = comp_illeg / comp_tot
+
+
+        sys_rts = list(self.web_server.global_completed_jobs)
+        sys_times = list(self.web_server.completion_times)
+        for s in self.spike_servers:
+            sys_rts.extend(s.global_completed_jobs)
+            sys_times.extend(s.completion_times)
+
+        row["system_rt_mean"] = _rt_mean_upto(sys_rts, sys_times, when)
+
         return row
 
     def arrival_process(self, mode):
-
+        """
+        FIX: per 'transitory' e 'finite simulation' gli arrivi NON si fermano a N_ARRIVALS
+        ma continuano fino allo stop temporale. Per 'verification' e 'standard' restano
+        basati sul conteggio N_ARRIVALS.
+        """
         if mode == "verification":
             arrivals = N_ARRIVALS_VERIFICATION
             interarrival_mode = "verification"
-        elif mode == "transitory":
+            stop_on_arrivals = True
+        elif mode in ("transitory", "finite simulation"):  # <<< FIX
             interarrival_mode = "standard"
+            stop_on_arrivals = False
         else:  # "standard"
             arrivals = N_ARRIVALS 
             interarrival_mode = "standard"
+            stop_on_arrivals = True
 
-        if mode == "transitory":
+        if not stop_on_arrivals:
+            # Arrivi continui fino allo stop temporale (env.run(...))
             while True:
                 interarrival_time = get_interarrival_time(interarrival_mode, self.arrival_p, self.arrival_l1, self.arrival_l2)
                 yield self.env.timeout(interarrival_time)
@@ -117,7 +183,8 @@ class DDoSSystem:
 
                 job = Job(self.metrics["total_arrivals"], arrival_time, None, is_legal)
                 self.mitigation_manager.handle_job(job)
-        else:   
+        else:
+            # Arrivi fino a N_ARRIVALS
             while self.metrics["total_arrivals"] < arrivals:
                 interarrival_time = get_interarrival_time(interarrival_mode, self.arrival_p, self.arrival_l1, self.arrival_l2)
                 yield self.env.timeout(interarrival_time)
@@ -227,6 +294,7 @@ class DDoSSystem:
                 row[f"spike{i}_rt_mean_bm"]    = ""
                 row[f"spike{i}_throughput_bm"] = ""
                 row[f"spike{i}_completions"]   = ""
+
         return row
 
     def report(self):
@@ -351,7 +419,7 @@ def run_simulation(scenario:str, mode: str, batch_means: bool, arrival_p=None, a
     """
     if mode not in ("verification", "standard"):
         raise ValueError("mode must be 'verification' or 'standard'")
-    if arrival_p == None:
+    if arrival_p is None:
         arrival_p = ARRIVAL_P
         arrival_l1 = ARRIVAL_L1
         arrival_l2 = ARRIVAL_L2
@@ -371,10 +439,16 @@ def transitory_fieldnames(max_spikes: int):
         "web_rt_mean", "web_util", "web_throughput",
         # Mitigation
         "mit_rt_mean", "mit_util", "mit_throughput",
-        # Contatori globali
+        # Globale
+        "system_rt_mean",  # <<<<<< aggiunta
         "arrivals_so_far", "false_positives_so_far", "mitigation_completions_so_far",
         # Meta
         "spikes_count", "scenario", "mode", "is_final",
+        # Mix/quote
+        "illegal_share",
+        "processed_legal_share", "processed_illegal_share",
+        "completed_legal_share", "completed_illegal_share",
+        "completed_legal_of_completed_share", "completed_illegal_of_completed_share",
     ]
     for i in range(max_spikes):
         base += [f"spike{i}_rt_mean", f"spike{i}_util", f"spike{i}_throughput"]
@@ -396,7 +470,6 @@ def run_finite_sim(mode: str, batch_means: bool, scenario: str, out_csv: str):
     all_logs = []
 
     if mode == "transitory":
-
         for rep in range(REPLICATION_FACTOR_TRANSITORY):
             seed = SEEDS_TRANSITORY[rep % len(SEEDS_TRANSITORY)]
             plantSeeds(seed)
@@ -406,8 +479,8 @@ def run_finite_sim(mode: str, batch_means: bool, scenario: str, out_csv: str):
                                 enable_ci=batch_means)
 
             def checkpointer(env, system, rep_id):
-                next_cp = CHECKPOINT_TIME_TRANSITORY
-                while next_cp <= STOP_CONDITION_TRANSOTORY:
+                next_cp = CHECKPOINT_TRANSITORY
+                while next_cp <= STOP_TRANSITORY:
                     yield env.timeout(next_cp - env.now)
                     snap = system.snapshot(env.now, replica_id=rep_id)
                     # metadati sempre presenti
@@ -416,12 +489,12 @@ def run_finite_sim(mode: str, batch_means: bool, scenario: str, out_csv: str):
                     snap["is_final"] = False
 
                     all_logs.append(snap)
-                    append_row_stable(out_csv, snap, fieldnames)  # <--- usa lo scrittore stabile
-                    next_cp += CHECKPOINT_TIME_TRANSITORY
+                    append_row_stable(out_csv, snap, fieldnames)
+                    next_cp += CHECKPOINT_TRANSITORY
 
                 # Ultimo snapshot esatto al termine
-                if env.now < STOP_CONDITION_TRANSOTORY:
-                    yield env.timeout(STOP_CONDITION_TRANSOTORY - env.now)
+                if env.now < STOP_TRANSITORY:
+                    yield env.timeout(STOP_TRANSITORY - env.now)
                     snap = system.snapshot(env.now, replica_id=rep_id)
                     snap["scenario"] = scenario
                     snap["mode"] = mode
@@ -431,51 +504,46 @@ def run_finite_sim(mode: str, batch_means: bool, scenario: str, out_csv: str):
                     append_row_stable(out_csv, snap, fieldnames)
 
             env.process(checkpointer(env, system, rep))
-            env.run(until=STOP_CONDITION_TRANSOTORY)
+            env.run(until=STOP_TRANSITORY)
         
     elif mode == "finite simulation":
-            
-            seeds = []
-            seeds.append(1234566789)
+        seeds = [1234566789]  # seed iniziale (valido: < MODULUS)
+        for rep in range(REPLICATION_FACTORY_FINITE_SIMULATION):
+            plantSeeds(seeds[rep])
+            env = simpy.Environment()
+            system = DDoSSystem(env, mode, arrival_p, arrival_l1, arrival_l2,
+                                enable_ci=batch_means)
 
-            for rep in range(REPLICATION_FACTORY_FINITE_SIMULATION):
-                
-                plantSeeds(seeds[rep])
-                
-                env = simpy.Environment()
-                system = DDoSSystem(env, mode, arrival_p, arrival_l1, arrival_l2,
-                                    enable_ci=batch_means)
+            def checkpointer(env, system, rep_id):
+                next_cp = CHECKPOINT_TIME_FINITE_SIMULATION
+                while next_cp <= STOP_CONDITION_FINITE_SIMULATION:
+                    yield env.timeout(next_cp - env.now)
+                    snap = system.snapshot(env.now, replica_id=rep_id)
+                    # metadati sempre presenti
+                    snap["scenario"] = scenario
+                    snap["mode"] = mode
+                    snap["is_final"] = False
 
-                def checkpointer(env, system, rep_id):
-                    next_cp = CHECKPOINT_TIME_FINITE_SIMULATION
-                    while next_cp <= STOP_CONDITION_FINITE_SIMULATION:
-                        yield env.timeout(next_cp - env.now)
-                        snap = system.snapshot(env.now, replica_id=rep_id)
-                        # metadati sempre presenti
-                        snap["scenario"] = scenario
-                        snap["mode"] = mode
-                        snap["is_final"] = False
+                    all_logs.append(snap)
+                    append_row_stable(out_csv, snap, fieldnames)
+                    next_cp += CHECKPOINT_TIME_FINITE_SIMULATION
 
-                        all_logs.append(snap)
-                        append_row_stable(out_csv, snap, fieldnames)  # <--- usa lo scrittore stabile
-                        next_cp += CHECKPOINT_TIME_FINITE_SIMULATION
+                # Ultimo snapshot esatto al termine
+                if env.now < STOP_CONDITION_FINITE_SIMULATION:
+                    yield env.timeout(STOP_CONDITION_FINITE_SIMULATION - env.now)
+                    snap = system.snapshot(env.now, replica_id=rep_id)
+                    snap["scenario"] = scenario
+                    snap["mode"] = mode
+                    snap["is_final"] = True
 
-                    # Ultimo snapshot esatto al termine
-                    if env.now < STOP_CONDITION_FINITE_SIMULATION:
-                        yield env.timeout(STOP_CONDITION_FINITE_SIMULATION - env.now)
-                        snap = system.snapshot(env.now, replica_id=rep_id)
-                        snap["scenario"] = scenario
-                        snap["mode"] = mode
-                        snap["is_final"] = True
+                    all_logs.append(snap)
+                    append_row_stable(out_csv, snap, fieldnames)
 
-                        all_logs.append(snap)
-                        append_row_stable(out_csv, snap, fieldnames)
+            env.process(checkpointer(env, system, rep))
+            env.run(until=STOP_CONDITION_FINITE_SIMULATION)
 
-                env.process(checkpointer(env, system, rep))
-                env.run(until=STOP_CONDITION_FINITE_SIMULATION)
+            # Genera un nuovo seed "derivato" (usando uno stream dedicato)
+            selectStream(RNG_STREAM)
+            seeds.append(getSeed())
 
-                selectStream(RNG_STREAM)
-                seeds.append(getSeed())
-
-    
     return all_logs

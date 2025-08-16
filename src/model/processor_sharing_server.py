@@ -21,6 +21,9 @@ class ProcessorSharingServer:
         self._busy_cum_times = [0.0]
         self._busy_cum_values = [0.0]
 
+        self.completed_jobs = []           # response times "locali" (nel centro)
+        self.global_completed_jobs = []    # NEW: response times "globali" (incl. mitigazione)
+
         self.completion_times = []  # absolute times
 
         # NEW: periodi busy per window stats unificati
@@ -95,8 +98,12 @@ class ProcessorSharingServer:
 
         if job in self.jobs:
             self.jobs.remove(job)
-            response_time = now - job.arrival
+            response_time = now - job.arrival      # RT locale centro
+            # NEW: RT globale = dal primo ingresso nel sistema
+            global_rt = now - getattr(job, "sys_arrival", job.arrival)
+
             self.completed_jobs.append(response_time)
+            self.global_completed_jobs.append(global_rt)   # NEW
             self.completion_times.append(now)
             self.total_completions += 1
 

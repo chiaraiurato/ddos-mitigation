@@ -6,3 +6,4 @@ class Job:
         self.original_service = service_time
         self.last_updated = arrival_time
         self.is_legal = is_legal
+        self.sys_arrival = arrival_time
