@@ -3,10 +3,6 @@ Spaghetti plot per analisi a ORIZZONTE FINITO (senza legenda) + tabella QoS.
 - Legge il CSV dei checkpoint (es. results_finite_simulation.csv)
 - Salva grafici in ./finite_simulation/
 - Genera anche ./finite_simulation/qos_summary.csv e .md
-
-Esempio:
-python3 plot_finite_simulation.py --csv results_finite_simulation.csv --time-unit hour --vline 10800 \
-  --qos-min-legal-completed 0.70 --qos-max-illegal-completed 0.15
 """
 
 import argparse
@@ -15,7 +11,7 @@ from typing import List, Optional
 
 import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib.ticker import PercentFormatter
+from matplotlib.ticker import FormatStrFormatter
 
 # Colonne
 TIME_COL = "time"
@@ -24,7 +20,7 @@ FINAL_COL= "is_final"
 
 # Metriche (plottiamo solo quelle effettivamente presenti nel CSV)
 METRICS = [
-    "web_rt_mean", "mit_rt_mean", "system_rt_mean",   # << aggiunta qui
+    "web_rt_mean", "mit_rt_mean", "system_rt_mean",
     "web_util", "web_throughput",
     "mit_util", "mit_throughput",
     "spikes_count",
@@ -35,18 +31,16 @@ METRICS = [
 ]
 
 def metric_to_label(metric: str) -> str:
-    if metric == "system_rt_mean":     return "Tempo di risposta medio globale (s)"  # << nuovo
+    if metric == "system_rt_mean":     return "Tempo di risposta medio globale (s)"
     if metric.endswith("rt_mean"):     return "Tempo di risposta medio (s)"
     if metric.endswith("throughput"):  return "Throughput (jobs/s)"
-    if metric.endswith("util"):        return "Utilizzazione (%)"
+    if metric.endswith("util"):        return "Utilizzazione"
     if metric == "spikes_count":       return "Spike allocati"
     if "share" in metric:              return "Percentuale (%)"
     return metric
 
-
-# quali metriche sono percentuali (0..1) e vanno mostrate in %
+# metriche che restano in percentuale (0..1 -> 0..100%)
 PERCENT_METRICS = {
-    "web_util", "mit_util",
     "illegal_share",
     "processed_legal_share", "processed_illegal_share",
     "completed_legal_share", "completed_illegal_share",
@@ -64,7 +58,7 @@ def time_scale_and_label(unit: str):
     if unit in ("d","day","days"):             return 1/86400.0, "Tempo (giorni)"
     raise ValueError("time-unit non riconosciuta: usa s|h|hour|day")
 
-# ---------- plotting ----------
+# ---------- plotting generico (no util) ----------
 def spaghetti_no_legend(df: pd.DataFrame,
                         metric: str,
                         scale: float,
@@ -86,11 +80,8 @@ def spaghetti_no_legend(df: pd.DataFrame,
     for _, g in d.groupby(REP_COL):
         gx = g[TIME_COL].to_numpy() * scale
         gy = g[metric].to_numpy()
-
-        # portiamo in percentuale le metriche percentuali
         if metric in PERCENT_METRICS:
             gy = gy * 100.0
-
         plt.plot(gx, gy, linewidth=1.2)
 
     if vline_sec is not None:
@@ -100,22 +91,108 @@ def spaghetti_no_legend(df: pd.DataFrame,
     plt.ylabel(metric_to_label(metric))
     plt.title(f"{metric} — orizzonte finito")
     plt.grid(True)
-
-    # formattazione asse Y per percentuali
-    if metric in PERCENT_METRICS:
-        ax.yaxis.set_major_formatter(PercentFormatter(xmax=100))
-        # limiti "comodi" 0..100 se util/share
-        ymin, ymax = ax.get_ylim()
-        lo = 0
-        hi = min(max(100, ymax), 100) if "util" in metric or "share" in metric else ymax
-        ax.set_ylim(lo, hi)
-
     plt.tight_layout()
+
     outpath = outdir / f"{metric}_spaghetti.png"
     plt.savefig(outpath, dpi=150, bbox_inches="tight")
     plt.close()
     return outpath
 
+# ---------- plotting dedicato alle UTIL ----------
+def spaghetti_util(df: pd.DataFrame,
+                   metric: str,
+                   scale: float,
+                   xlabel: str,
+                   outdir: Path,
+                   round_time_decimals: Optional[int] = 0,
+                   vline_sec: Optional[float] = None):
+    """Plot full-scale 0..1 con headroom sopra 1.0 e tick a 3 decimali."""
+    d = df[[TIME_COL, REP_COL, metric]].dropna().copy()
+    if d.empty:
+        return None
+
+    if round_time_decimals is not None:
+        d[TIME_COL] = d[TIME_COL].round(round_time_decimals)
+    d = d.sort_values([REP_COL, TIME_COL])
+
+    plt.figure()
+    ax = plt.gca()
+
+    for _, g in d.groupby(REP_COL):
+        gx = g[TIME_COL].to_numpy() * scale
+        gy = g[metric].to_numpy()
+        plt.plot(gx, gy, linewidth=1.2)
+
+    if vline_sec is not None:
+        plt.axvline(x=vline_sec * scale, linestyle="--")
+
+    # scala 0..1 con leggero margine sopra per "spazio bianco"
+    headroom = 0.001  # ~0.1% sopra 1.0
+    ax.set_ylim(0.0, 1.0 + headroom)
+    ax.yaxis.set_major_formatter(FormatStrFormatter('%.3f'))
+    plt.axhline(1.0, color='gray', linewidth=0.8, alpha=0.6)
+
+    plt.xlabel(xlabel)
+    plt.ylabel(metric_to_label(metric))
+    plt.title(f"{metric} — orizzonte finito")
+    plt.grid(True)
+    plt.tight_layout()
+
+    outpath = outdir / f"{metric}_spaghetti.png"
+    plt.savefig(outpath, dpi=150, bbox_inches="tight")
+    plt.close()
+    return outpath
+
+def spaghetti_util_zoom(df: pd.DataFrame,
+                        metric: str,
+                        scale: float,
+                        xlabel: str,
+                        outdir: Path,
+                        round_time_decimals: Optional[int] = 0,
+                        vline_sec: Optional[float] = None):
+    """Zoom automatico intorno ai valori osservati, con headroom e 3 decimali."""
+    d = df[[TIME_COL, REP_COL, metric]].dropna().copy()
+    if d.empty:
+        return None
+
+    if round_time_decimals is not None:
+        d[TIME_COL] = d[TIME_COL].round(round_time_decimals)
+    d = d.sort_values([REP_COL, TIME_COL])
+
+    ymin_obs = d[metric].min()
+    ymax_obs = d[metric].max()
+    # delta per lo zoom (dipende dallo spread osservato)
+    spread = max(ymax_obs - ymin_obs, 1e-6)
+    delta  = max(0.0003, spread * 0.30)  # 0.03%–… di margine
+    low  = max(0.0, ymin_obs - delta)
+    high = min(1.0 + 0.001, ymax_obs + delta)  # un pelo sopra 1.0
+
+    plt.figure()
+    ax = plt.gca()
+    for _, g in d.groupby(REP_COL):
+        gx = g[TIME_COL].to_numpy() * scale
+        gy = g[metric].to_numpy()
+        plt.plot(gx, gy, linewidth=1.2)
+
+    if vline_sec is not None:
+        plt.axvline(x=vline_sec * scale, linestyle="--")
+
+    ax.set_ylim(low, high)
+    ax.yaxis.set_major_formatter(FormatStrFormatter('%.3f'))
+    plt.axhline(1.0, color='gray', linewidth=0.8, alpha=0.6)
+
+    plt.xlabel(xlabel)
+    plt.ylabel(metric_to_label(metric))
+    plt.title(f"{metric} — orizzonte finito (zoom)")
+    plt.grid(True)
+    plt.tight_layout()
+
+    outpath = outdir / f"{metric}_spaghetti_zoom.png"
+    plt.savefig(outpath, dpi=150, bbox_inches="tight")
+    plt.close()
+    return outpath
+
+# ---------- QoS ----------
 def qos_tables(df: pd.DataFrame,
                outdir: Path,
                min_legal_completed: Optional[float],
@@ -125,7 +202,6 @@ def qos_tables(df: pd.DataFrame,
     if FINAL_COL in df.columns:
         dfin = df[df[FINAL_COL] == True].copy()
         if dfin.empty:
-            # fallback: ultimo tempo per replica
             dfin = df.sort_values(TIME_COL).groupby(REP_COL, as_index=False).tail(1)
     else:
         dfin = df.sort_values(TIME_COL).groupby(REP_COL, as_index=False).tail(1)
@@ -139,36 +215,32 @@ def qos_tables(df: pd.DataFrame,
     keep_cols = [c for c in keep_cols if c in dfin.columns]
     d = dfin[keep_cols].copy()
 
-    # convertiamo in %
+    # quote in percentuale
     for c in d.columns:
         if c.endswith("_share"):
             d[c] = d[c] * 100.0
 
-    # QoS check (opzionali): PASS/FAIL
     if ("completed_legal_share" in d.columns) and (min_legal_completed is not None):
         d["qos_min_legal_completed_pass"] = d["completed_legal_share"] >= (min_legal_completed * 100.0)
     if ("completed_illegal_share" in d.columns) and (max_illegal_completed is not None):
         d["qos_max_illegal_completed_pass"] = d["completed_illegal_share"] <= (max_illegal_completed * 100.0)
 
-    # salva CSV
     csv_out = outdir / "qos_summary.csv"
     d.to_csv(csv_out, index=False)
 
-    # salva markdown breve
     md_out = outdir / "qos_summary.md"
     with open(md_out, "w") as f:
         f.write("| replica | time | compl_legal% | compl_illegal% | proc_legal% | proc_illegal% | illegal_arrivals% | QoS |\n")
         f.write("|---:|---:|---:|---:|---:|---:|---:|:--:|\n")
         for _, r in d.iterrows():
-            qos_flag = "—"
             flags = []
             if "qos_min_legal_completed_pass" in r:
                 flags.append("L OK" if r["qos_min_legal_completed_pass"] else "L FAIL")
             if "qos_max_illegal_completed_pass" in r:
                 flags.append("I OK" if r["qos_max_illegal_completed_pass"] else "I FAIL")
-            if flags: qos_flag = ", ".join(flags)
+            qos_flag = "—" if not flags else ", ".join(flags)
 
-            def fmt(c): 
+            def fmt(c):
                 return f"{r[c]:.2f}" if c in d.columns else ""
             f.write(f"| {int(r[REP_COL])} | {r[TIME_COL]:.0f} | {fmt('completed_legal_share')} | {fmt('completed_illegal_share')} | {fmt('processed_legal_share')} | {fmt('processed_illegal_share')} | {fmt('illegal_share')} | {qos_flag} |\n")
 
@@ -207,12 +279,18 @@ def main():
     scale, xlabel = time_scale_and_label(args.time_unit)
     round_time_decimals = None if args.round_time is not None and args.round_time < 0 else args.round_time
 
-    # genera spaghetti plot SENZA legenda
+    # genera plot
     for metric in metrics:
-        spaghetti_no_legend(df, metric, scale, xlabel, outdir,
-                            round_time_decimals=round_time_decimals, vline_sec=args.vline)
+        if metric.endswith("util"):
+            spaghetti_util(df, metric, scale, xlabel, outdir,
+                           round_time_decimals=round_time_decimals, vline_sec=args.vline)
+            spaghetti_util_zoom(df, metric, scale, xlabel, outdir,
+                                round_time_decimals=round_time_decimals, vline_sec=args.vline)
+        else:
+            spaghetti_no_legend(df, metric, scale, xlabel, outdir,
+                                round_time_decimals=round_time_decimals, vline_sec=args.vline)
 
-    # tabella QoS finale
+    # tabella QoS
     qos_tables(
         df,
         outdir,

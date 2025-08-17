@@ -75,18 +75,22 @@ class MitigationManager:
             return
 
         # Feedback (retry) verso la mitigazione
-        selectStream(RNG_STREAM_FEEDBACK) 
+        selectStream(RNG_STREAM_FEEDBACK)
         if random() < P_FEEDBACK_VERIFICATION:
-            job.arrival = now
+            job.arrival = now  # reset arrivo locale in caso di retry
             self.handle_job(job)  # retry
             return
 
         # Superata la mitigazione: assegna tempo di servizio e route verso Web/Spike
-        selectStream(RNG_STREAM_SERVICE_TIMES) 
+        selectStream(RNG_STREAM_SERVICE_TIMES)
         service_time = get_service_time(self.mode)
         job.remaining = service_time
         job.original_service = service_time
         job.last_updated = now
+
+        # >>> RESET dell'arrivo locale per i centri a valle (Web/Spike) <<<
+        # Manteniamo intatto job.sys_arrival (arrivo globale) per il system_rt_mean end-to-end.
+        job.arrival = now
 
         # Routing verso Web se c'è spazio, altrimenti Spike esistenti, altrimenti creane uno nuovo
         if len(self.web_server.jobs) < MAX_WEB_CAPACITY:
