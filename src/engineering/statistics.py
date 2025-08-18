@@ -2,6 +2,29 @@ import numpy as np
 from library.rvms import idfStudent
 from engineering.costants import BATCH_SIZE, N_BATCH, CONFIDENCE_LEVEL
 
+def make_batch_means_series(data, b, burn_in=0, k_max=None):
+    """
+    Restituisce la SERIE delle medie di batch.
+    - data: array-like dei tempi di risposta per-job
+    - b: batch size s
+    - burn_in: scarta i primi 'burn_in' completamenti prima di batchizzare
+    - k_max: opzionale, limita il numero di batch (per file più piccoli)
+    """
+    if data is None:
+        raise ValueError("data=None")
+    x = np.asarray(list(data), dtype=float)
+    if burn_in > 0 and x.size > burn_in:
+        x = x[burn_in:]
+    n = x.size
+    if n < b:
+        raise ValueError(f"Not enough samples after burn-in: n={n} < b={b}")
+    k = n // b
+    if k_max is not None:
+        k = min(k, int(k_max))
+    trimmed = x[:k * b]
+    means = trimmed.reshape(k, b).mean(axis=1)
+    return means 
+
 def _make_batches(data, b, k_max=None):
     n = len(data)
     if n < b:
@@ -73,11 +96,9 @@ def window_util_thr(busy_periods, completion_times, window, now):
     return util_samples, thr_samples
 
 
-def batch_means_rt(data, batch_size=None, n_batches=None, confidence=None, burn_in=0):
+def batch_means_cut_burn_in(data, batch_size=None, n_batches=None, confidence=None, burn_in=0):
     """
-    Batch Means 'classico' sui TEMPI DI RISPOSTA (serie per-job).
-    burn_in: scarta i primi 'burn_in' completamenti.
-    Ritorna (mean, half_width).
+    Scarta i primi 'burn_in' completamenti.
     """
     if data is None:
         raise ValueError("data=None")

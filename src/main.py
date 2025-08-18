@@ -1,5 +1,5 @@
 import sys
-from controller.simulation import run_simulation, run_finite_sim, run_infinite_horizon_bm_to_csv
+from controller.simulation import run_simulation, run_finite_sim, run_infinite_horizon
 from engineering.costants import *
 
 from library.rngs import plantSeeds
@@ -52,28 +52,28 @@ def run_sim():
             plantSeeds(RNG_SEED_STANDARD)
 
         if mode == "verification":
-        
-            run_simulation("x1", "verification", batch_means=True)
-        
+
+            run_simulation("x1", "verification", enable_windowing=True)
+
         elif mode == "standard":
-        
-            run_simulation("x1","standard", batch_means=True)
-        
+
+            run_simulation("x1","standard", enable_windowing=True)
+
         elif mode == "single":
-        
-            run_simulation("x1","standard", batch_means=False)
-        
+
+            run_simulation("x1","standard", enable_windowing=False)
+
         elif mode == "validation":
-        
-            run_simulation("x1","standard", batch_means=True)
-            run_simulation("x2", "standard", batch_means=True, arrival_p=ARRIVAL_P, arrival_l1=ARRIVAL_L1_x2, arrival_l2=ARRIVAL_L2_x2)
-            run_simulation("x5","standard", batch_means=True, arrival_p=ARRIVAL_P, arrival_l1=ARRIVAL_L1_x5, arrival_l2=ARRIVAL_L2_x5)
-            run_simulation("x10","standard", batch_means=True, arrival_p=ARRIVAL_P, arrival_l1=ARRIVAL_L1_x10, arrival_l2=ARRIVAL_L2_x10)
-            run_simulation("x40","standard", batch_means=True, arrival_p=ARRIVAL_P, arrival_l1=ARRIVAL_L1_x40, arrival_l2=ARRIVAL_L2_x40)
-        
+
+            run_simulation("x1","standard", enable_windowing=True)
+            run_simulation("x2", "standard", enable_windowing=True, arrival_p=ARRIVAL_P, arrival_l1=ARRIVAL_L1_x2, arrival_l2=ARRIVAL_L2_x2)
+            run_simulation("x5","standard", enable_windowing=True, arrival_p=ARRIVAL_P, arrival_l1=ARRIVAL_L1_x5, arrival_l2=ARRIVAL_L2_x5)
+            run_simulation("x10","standard", enable_windowing=True, arrival_p=ARRIVAL_P, arrival_l1=ARRIVAL_L1_x10, arrival_l2=ARRIVAL_L2_x10)
+            run_simulation("x40","standard", enable_windowing=True, arrival_p=ARRIVAL_P, arrival_l1=ARRIVAL_L1_x40, arrival_l2=ARRIVAL_L2_x40)
+
         elif mode == "transitory":
 
-            logs = run_finite_sim("transitory", batch_means=False,
+            logs = run_finite_sim("transitory", enable_windowing=False,
                               scenario="transitory_x40",
                               out_csv="plot/results_transitory.csv")
             
@@ -83,8 +83,8 @@ def run_sim():
             print(f"\n[OK] Log del transitorio salvati in: plot/results_transitory.csv")
 
         elif mode == "finite simulation":
-            
-            logs = run_finite_sim("finite simulation", batch_means=False,
+
+            logs = run_finite_sim("finite simulation", enable_windowing=False,
                               scenario="finite simulation",
                               out_csv="plot/results_finite_simulation.csv")
             
@@ -96,9 +96,9 @@ def run_sim():
         elif mode == "infinite simulation":
 
             # una run con burn-in di 5000 completamenti
-            run_infinite_horizon_bm_to_csv(
-                scenario="validation_infinite",
-                mode="standard",              
+            run_infinite_horizon(
+                mode="standard",      
+                enable_batch_means=True,        
                 out_csv="results_infinite_bm.csv",
                 burn_in_rt=5000
             )
