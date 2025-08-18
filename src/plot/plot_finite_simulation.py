@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Spaghetti plot per analisi a ORIZZONTE FINITO (senza legenda) + tabella QoS.
 - Legge il CSV dei checkpoint (es. results_finite_simulation.csv)
@@ -18,8 +20,8 @@ TIME_COL = "time"
 REP_COL  = "replica"
 FINAL_COL= "is_final"
 
-# Metriche (plottiamo solo quelle effettivamente presenti nel CSV)
-METRICS = [
+# Metriche base (le per-spike verranno aggiunte dinamicamente dal CSV)
+BASE_METRICS = [
     "web_rt_mean", "mit_rt_mean", "system_rt_mean",
     "web_util", "web_throughput",
     "mit_util", "mit_throughput",
@@ -31,6 +33,7 @@ METRICS = [
 ]
 
 def metric_to_label(metric: str) -> str:
+    # etichette asse Y
     if metric == "system_rt_mean":     return "Tempo di risposta medio globale (s)"
     if metric.endswith("rt_mean"):     return "Tempo di risposta medio (s)"
     if metric.endswith("throughput"):  return "Throughput (jobs/s)"
@@ -39,7 +42,7 @@ def metric_to_label(metric: str) -> str:
     if "share" in metric:              return "Percentuale (%)"
     return metric
 
-# metriche che restano in percentuale (0..1 -> 0..100%)
+# metriche “share” (0..1) da mostrare come percentuali 0..100
 PERCENT_METRICS = {
     "illegal_share",
     "processed_legal_share", "processed_illegal_share",
@@ -50,6 +53,32 @@ PERCENT_METRICS = {
 # ---------- helpers ----------
 def guess_available_metrics(df: pd.DataFrame, candidates: List[str]) -> List[str]:
     return [m for m in candidates if m in df.columns]
+
+def find_spike_metrics(df: pd.DataFrame) -> List[str]:
+    """
+    Cerca automaticamente colonne per-spike del tipo:
+      spike{i}_rt_mean, spike{i}_util, spike{i}_throughput
+    """
+    cols = []
+    for c in df.columns:
+        if not c.startswith("spike"):
+            continue
+        if c.endswith("_rt_mean") or c.endswith("_util") or c.endswith("_throughput"):
+            cols.append(c)
+    # ordinamento “umano”: spike0_..., spike1_..., ecc.
+    def key(c):
+        # estrae l’indice numerico dopo 'spike'
+        try:
+            left = c.split("_", 1)[0]  # spike0
+            i = int(left.replace("spike", ""))
+        except Exception:
+            i = 10**9
+        # ordina per (indice, tipo metrica)
+        if c.endswith("_rt_mean"): suf = 0
+        elif c.endswith("_util"): suf = 1
+        else: suf = 2  # throughput
+        return (i, suf, c)
+    return sorted(cols, key=key)
 
 def time_scale_and_label(unit: str):
     unit = unit.lower()
@@ -81,7 +110,7 @@ def spaghetti_no_legend(df: pd.DataFrame,
         gx = g[TIME_COL].to_numpy() * scale
         gy = g[metric].to_numpy()
         if metric in PERCENT_METRICS:
-            gy = gy * 100.0
+            gy = gy * 100.0  # mostriamo in percentuale solo le “share”
         plt.plot(gx, gy, linewidth=1.2)
 
     if vline_sec is not None:
@@ -106,7 +135,7 @@ def spaghetti_util(df: pd.DataFrame,
                    outdir: Path,
                    round_time_decimals: Optional[int] = 0,
                    vline_sec: Optional[float] = None):
-    """Plot full-scale 0..1 con headroom sopra 1.0 e tick a 3 decimali."""
+    """Plot 0..1 con headroom sopra 1.0 e tick a 3 decimali (web/mit/spike*)."""
     d = df[[TIME_COL, REP_COL, metric]].dropna().copy()
     if d.empty:
         return None
@@ -121,12 +150,12 @@ def spaghetti_util(df: pd.DataFrame,
     for _, g in d.groupby(REP_COL):
         gx = g[TIME_COL].to_numpy() * scale
         gy = g[metric].to_numpy()
+        # niente conversione in percentuale: util resta [0..1] float
         plt.plot(gx, gy, linewidth=1.2)
 
     if vline_sec is not None:
         plt.axvline(x=vline_sec * scale, linestyle="--")
 
-    # scala 0..1 con leggero margine sopra per "spazio bianco"
     headroom = 0.001  # ~0.1% sopra 1.0
     ax.set_ylim(0.0, 1.0 + headroom)
     ax.yaxis.set_major_formatter(FormatStrFormatter('%.3f'))
@@ -161,11 +190,10 @@ def spaghetti_util_zoom(df: pd.DataFrame,
 
     ymin_obs = d[metric].min()
     ymax_obs = d[metric].max()
-    # delta per lo zoom (dipende dallo spread osservato)
     spread = max(ymax_obs - ymin_obs, 1e-6)
-    delta  = max(0.0003, spread * 0.30)  # 0.03%–… di margine
+    delta  = max(0.0003, spread * 0.30)  # margine dinamico
     low  = max(0.0, ymin_obs - delta)
-    high = min(1.0 + 0.001, ymax_obs + delta)  # un pelo sopra 1.0
+    high = min(1.0 + 0.001, ymax_obs + delta)  # un filo sopra 1.0
 
     plt.figure()
     ax = plt.gca()
@@ -198,7 +226,6 @@ def qos_tables(df: pd.DataFrame,
                min_legal_completed: Optional[float],
                max_illegal_completed: Optional[float]):
 
-    # prendiamo solo i checkpoint finali per replica
     if FINAL_COL in df.columns:
         dfin = df[df[FINAL_COL] == True].copy()
         if dfin.empty:
@@ -270,10 +297,13 @@ def main():
 
     df = pd.read_csv(csv_path)
 
-    # metriche disponibili
-    metrics = guess_available_metrics(df, METRICS)
+    # metriche di base + metriche per-spike dal CSV
+    metrics_base  = guess_available_metrics(df, BASE_METRICS)
+    metrics_spike = find_spike_metrics(df)
+    metrics = list(dict.fromkeys(metrics_base + metrics_spike))  # dedup preservando l’ordine
+
     if not metrics:
-        raise ValueError(f"Nessuna metrica trovata tra {METRICS}. Colonne presenti: {list(df.columns)}")
+        raise ValueError(f"Nessuna metrica trovata. Colonne presenti: {list(df.columns)}")
 
     # scala temporale + arrotondamento
     scale, xlabel = time_scale_and_label(args.time_unit)

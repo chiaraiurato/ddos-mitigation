@@ -71,3 +71,21 @@ def window_util_thr(busy_periods, completion_times, window, now):
         thr_samples.append(count / window)
 
     return util_samples, thr_samples
+
+
+def batch_means_rt(data, batch_size=None, n_batches=None, confidence=None, burn_in=0):
+    """
+    Batch Means 'classico' sui TEMPI DI RISPOSTA (serie per-job).
+    burn_in: scarta i primi 'burn_in' completamenti.
+    Ritorna (mean, half_width).
+    """
+    if data is None:
+        raise ValueError("data=None")
+    if burn_in > 0 and len(data) > burn_in:
+        data = data[burn_in:]
+    return batch_means(
+        data,
+        batch_size=batch_size,
+        n_batches=n_batches,
+        confidence=confidence
+    )

@@ -1,5 +1,5 @@
 import sys
-from controller.simulation import run_simulation, run_finite_sim
+from controller.simulation import run_simulation, run_finite_sim, run_infinite_horizon_bm_to_csv
 from engineering.costants import *
 
 from library.rngs import plantSeeds
@@ -95,7 +95,14 @@ def run_sim():
 
         elif mode == "infinite simulation":
 
-            print("TODO")
+            # una run con burn-in di 5000 completamenti
+            run_infinite_horizon_bm_to_csv(
+                scenario="validation_infinite",
+                mode="standard",              
+                out_csv="results_infinite_bm.csv",
+                burn_in_rt=5000
+            )
+
 
 if __name__ == "__main__":
     run_sim()

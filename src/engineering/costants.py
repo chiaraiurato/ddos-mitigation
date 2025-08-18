@@ -60,7 +60,7 @@ MAX_SPIKE_NUMBER = 4
 
 # Arrivals Number
 # N_ARRIVALS = 2585120
-N_ARRIVALS              = 1000000
+N_ARRIVALS              = 20000000
 N_ARRIVALS_VERIFICATION = 64628
 
 # Simulation Time
