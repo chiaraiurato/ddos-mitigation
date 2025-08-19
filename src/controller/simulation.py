@@ -339,28 +339,20 @@ class DDoSSystem:
         print("\n======== INTERVALLI DI CONFIDENZA (Utilization / Throughput per batch) ========")
 
         def _print_util_thr_ci_for(label_prefix, busy_periods, completion_times):
+            # Costruisco la serie per-batch usando lo stesso B dei RT.
             util_series, thr_series = util_thr_per_batch(
                 busy_periods,
                 completion_times,
                 B=B,
-                burn_in=burn_in_rt,
+                burn_in=burn_in_rt,  
                 k_max=None,
                 tmax=now
             )
-
-            # Utilization
-            if len(util_series) < 2:
-                print(f"{label_prefix} Utilization: skipped (only {len(util_series)} batch point, need ≥2 with B={B})")
-            else:
-                _print_ci(f"{label_prefix} Utilization",
-                        util_series, batch_size=1, n_batches=None, conf=confidence)
-
-            # Throughput
-            if len(thr_series) < 2:
-                print(f"{label_prefix} Throughput:  skipped (only {len(thr_series)} batch point, need ≥2 with B={B})")
-            else:
-                _print_ci(f"{label_prefix} Throughput",
-                        thr_series, batch_size=1, n_batches=None, conf=confidence)
+            # t-CI direttamente sulla serie per-batch
+            _print_ci(f"{label_prefix} Utilization",
+                    util_series, batch_size=1, n_batches=None, conf=confidence)
+            _print_ci(f"{label_prefix} Throughput",
+                    thr_series, batch_size=1, n_batches=None, conf=confidence)
 
         # Web
         _print_util_thr_ci_for("Web",
@@ -582,17 +574,17 @@ def run_infinite_horizon(mode: str,
     env = simpy.Environment()
     system = DDoSSystem(env, mode, arrival_p, arrival_l1, arrival_l2)
     env.run()
-    system.report_bm()
+    #system.report_bm()
+    print("\n==== START BATCH MEANS ====")
 
-    K_LAG = 50  # tienilo allineato a print_autocorrelation
+
+    # 1) Esporta le misurazioni per-batch (eg. RT/Util/Thr per CENTRO)
     csv_path, cols, k = export_bm_series_to_wide_csv(
         system,
         B=BATCH_SIZE,
-        out_csv=out_csv,
+        out_csv=out_csv,           
         burn_in=burn_in,
-        k_max=None,
-        k_min_common=N_BATCH,   
-        verbose=True
+        k_max=None     
     )
     print(f"[OK] bm_series in {csv_path} ({k} righe). Colonne: {cols}")
 
@@ -608,4 +600,3 @@ def run_infinite_horizon(mode: str,
     print(f"[OK] ACF salvata in: {out_acs}")
 
     return res_df
-

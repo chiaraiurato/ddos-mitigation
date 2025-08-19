@@ -2,7 +2,7 @@
 BATCH_SIZE          = 1256
 N_BATCH             = 128
 CONFIDENCE_LEVEL    = 0.95
-BURN_IN             = 5000  
+BURN_IN             = 1000  
 
 
 # Parameters 
