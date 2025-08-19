@@ -9,13 +9,13 @@ from engineering.costants import RNG_SEED_VERIFICATION, RNG_SEED_STANDARD, BURN_
 
 def choose_mode():
     print("Scegli la modalità:")
-    print("0. Singola run")
-    print("1. Verifica (distribuzioni esponenziali)")
-    print("2. Simulazione standard (distribuzioni iperesponenziali)")
-    print("3. Validazione")
-    print("4. Analisi del Transitorio")
-    print("5. Analisi ad Orizzonte Finito")
-    print("6. Analisi ad Orizzonte Infinito")
+    print("0. Singola run - Modello di Base")
+    print("1. Verifica (distribuzioni esponenziali) - Modello di Base")
+    print("2. Simulazione standard (distribuzioni iperesponenziali) - Modello di Base")
+    print("3. Validazione - Modello di Base")
+    print("4. Analisi del Transitorio - Modello dei Base")
+    print("5. Analisi ad Orizzonte Finito - Modello di Base")
+    print("6. Analisi ad Orizzonte Infinito - Modello di Base")
     print("7. Esci")
     choice = input("Inserisci: ").strip()
     if choice == "0":

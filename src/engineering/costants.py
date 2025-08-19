@@ -1,6 +1,6 @@
 # Batch Means Parameters
-BATCH_SIZE          = 128
-N_BATCH             = 64
+BATCH_SIZE          = 1256
+N_BATCH             = 128
 CONFIDENCE_LEVEL    = 0.95
 BURN_IN             = 5000  
 
@@ -61,7 +61,7 @@ MAX_SPIKE_NUMBER = 4
 
 # Arrivals Number
 # N_ARRIVALS = 2585120
-N_ARRIVALS              = 100000
+N_ARRIVALS              = 5000000
 N_ARRIVALS_VERIFICATION = 64628
 
 # Simulation Time

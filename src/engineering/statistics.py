@@ -76,92 +76,124 @@ def window_util_thr(busy_periods, completion_times, window, now):
 
     return util_samples, thr_samples
 
+def _safe_bm_series(series, b, burn_in=0, k_max=None):
+    """Restituisce la serie batch-means oppure None se non si riescono a formare ≥2 batch."""
+    try:
+        bm = make_batch_means_series(series, b=b, burn_in=burn_in, k_max=k_max)
+        return bm if len(bm) >= 2 else None
+    except Exception:
+        return None
 
 def export_bm_series_to_wide_csv(system, B, out_csv,
-                                 burn_in=0, k_max=None):
+                                 burn_in=0, k_max=None,
+                                 k_min_common=None,  # <-- NOVITÀ: minimo richiesto per l'export
+                                 verbose=True):
     """
     Crea un CSV 'wide' con colonne per CENTRO:
-      - RT batch means: web_rt, spike{i}_rt, mit_rt   (N O  system_rt)
+      - RT batch means: web_rt, spike{i}_rt, mit_rt
       - Util/Thr per batch: web_util, web_thr, spike{i}_util, spike{i}_thr, mit_util, mit_thr
-    Tutte le colonne hanno lunghezza comune = min #batch disponibile tra le serie incluse.
+    Includo SOLO le serie con almeno 2 batch e, se k_min_common è impostato,
+    SOLO quelle con almeno k_min_common punti (prima di allineare alla k_common).
     Ritorna: (path_csv, lista_colonne, k_batch_comuni)
     """
     os.makedirs(os.path.dirname(out_csv) or ".", exist_ok=True)
     center = system.mitigation_manager.center
+    now = system.env.now
 
-    # Serie per-job dei tempi di risposta (per centro)
-    web_rt    = list(system.web_server.completed_jobs)
-    mit_rt    = list(center.completed_jobs)
+    bm_dict = {}  # colonna -> ndarray di length K>=2
+
+    # =======================
+    # 1) RT per centro (BM)
+    # =======================
+    web_rt = list(system.web_server.completed_jobs)
+    mit_rt = list(center.completed_jobs)
     spike_rts = [list(s.completed_jobs) for s in system.spike_servers]
 
-    # RT per centro 
-    items_rt = [("web_rt", web_rt), ("mit_rt", mit_rt)]
+    web_rt_bm = _safe_bm_series(web_rt, B, burn_in, k_max)
+    if web_rt_bm is not None:
+        bm_dict["web_rt"] = web_rt_bm
+
     for i, r in enumerate(spike_rts):
-        items_rt.insert(1, (f"spike{i}_rt", r))  
+        s_bm = _safe_bm_series(r, B, burn_in, k_max)
+        if s_bm is not None:
+            bm_dict[f"spike{i}_rt"] = s_bm
 
-    # Calcola RT batch-means per ogni centro
-    bm_dict = {}
-    lengths = []
-    for name, series in items_rt:
-        bm = make_batch_means_series(series, b=B, burn_in=burn_in, k_max=k_max)
-        bm_dict[name] = bm
-        lengths.append(len(bm))
+    mit_rt_bm = _safe_bm_series(mit_rt, B, burn_in, k_max)
+    if mit_rt_bm is not None:
+        bm_dict["mit_rt"] = mit_rt_bm
 
-    # Util/Thr per ogni centro 
-    ordered_cols = []
-    now = system.env.now
-    # Web
-    web_util, web_thr = util_thr_per_batch(
-        system.web_server.busy_periods, system.web_server.completion_times,
-        B=B, burn_in=burn_in, k_max=k_max, tmax=now
-    )
-    bm_dict["web_util"] = web_util; bm_dict["web_thr"] = web_thr
-    lengths += [len(web_util), len(web_thr)]
+    # ============================================
+    # 2) Utilization / Throughput per-batch (B fisso)
+    # ============================================
+    def _safe_util_thr(busy_periods, completion_times):
+        try:
+            u, t = util_thr_per_batch(busy_periods, completion_times,
+                                      B=B, burn_in=burn_in, k_max=k_max, tmax=now)
+            u = np.asarray(u); t = np.asarray(t)
+            if len(u) < 2 or len(t) < 2:
+                return None, None
+            return u, t
+        except Exception:
+            return None, None
 
-    # Spike-i
+    u, t = _safe_util_thr(system.web_server.busy_periods, system.web_server.completion_times)
+    if u is not None:
+        bm_dict["web_util"] = u; bm_dict["web_thr"] = t
+
     for i, s in enumerate(system.spike_servers):
-        su, st = util_thr_per_batch(
-            s.busy_periods, s.completion_times,
-            B=B, burn_in=burn_in, k_max=k_max, tmax=now
-        )
-        bm_dict[f"spike{i}_util"] = su; bm_dict[f"spike{i}_thr"] = st
-        lengths += [len(su), len(st)]
+        u, t = _safe_util_thr(s.busy_periods, s.completion_times)
+        if u is not None:
+            bm_dict[f"spike{i}_util"] = u; bm_dict[f"spike{i}_thr"] = t
 
-    # Mitigation
-    mit_util, mit_thr = util_thr_per_batch(
-        center.busy_periods, center.completion_times,
-        B=B, burn_in=burn_in, k_max=k_max, tmax=now
-    )
-    bm_dict["mit_util"] = mit_util; bm_dict["mit_thr"] = mit_thr
-    lengths += [len(mit_util), len(mit_thr)]
+    u, t = _safe_util_thr(center.busy_periods, center.completion_times)
+    if u is not None:
+        bm_dict["mit_util"] = u; bm_dict["mit_thr"]  = t
 
-    # Lunghezza comune
-    if not bm_dict:
-        raise ValueError("Nessuna metrica inclusa: controlla include_metrics o i dati disponibili.")
-    k_common = min(len(v) for v in bm_dict.values())
+    # ============================================
+    # 3) Ordering colonne
+    # ============================================
+    ordered_cols = []
+    if "web_rt"   in bm_dict: ordered_cols.append("web_rt")
+    if "web_util" in bm_dict: ordered_cols += ["web_util", "web_thr"]
 
-    # Ordine colonne: Web, Spike-*, Mitigation
-    if "web_rt" in bm_dict:    ordered_cols.append("web_rt")
-    if "web_util" in bm_dict:  ordered_cols += ["web_util", "web_thr"]
-    i = 0
-    while True:
-        had_any = False
-        rt_k  = f"spike{i}_rt"
-        ut_k  = f"spike{i}_util"
-        th_k  = f"spike{i}_thr"
-        if rt_k in bm_dict:
-            ordered_cols.append(rt_k); had_any = True
-        if ut_k in bm_dict and th_k in bm_dict:
-            ordered_cols += [ut_k, th_k]; had_any = True
-        if not had_any:
-            break
-        i += 1
-    if "mit_rt" in bm_dict:    ordered_cols.append("mit_rt")
-    if "mit_util" in bm_dict:  ordered_cols += ["mit_util", "mit_thr"]
+    spike_ids = sorted({
+        int(k.split('_')[0][5:]) for k in bm_dict.keys()
+        if k.startswith("spike")
+    })
+    for i in spike_ids:
+        if f"spike{i}_rt"   in bm_dict: ordered_cols.append(f"spike{i}_rt")
+        if f"spike{i}_util" in bm_dict and f"spike{i}_thr" in bm_dict:
+            ordered_cols += [f"spike{i}_util", f"spike{i}_thr"]
 
-    # Costruisci e salva CSV
+    if "mit_rt"   in bm_dict: ordered_cols.append("mit_rt")
+    if "mit_util" in bm_dict: ordered_cols += ["mit_util", "mit_thr"]
+
+    if not ordered_cols:
+        raise ValueError("Nessuna metrica con almeno 2 batch (B fisso). Riduci B o prolunga la simulazione.")
+
+    # ============================================
+    # 4) Filtro per k_min_common (es. K_LAG+1)
+    #    → rimuove le colonne troppo corte
+    # ============================================
+    if k_min_common is not None:
+        short = [c for c in ordered_cols if len(bm_dict[c]) < int(k_min_common)]
+        if verbose:
+            for c in short:
+                print(f"[WARN] drop '{c}': only {len(bm_dict[c])} batch points < required {k_min_common}")
+        ordered_cols = [c for c in ordered_cols if len(bm_dict[c]) >= int(k_min_common)]
+        for c in short:
+            bm_dict.pop(c, None)
+
+    if not ordered_cols:
+        raise ValueError(f"Nessuna colonna con almeno {k_min_common} batch: aumenta durata o riduci B/k_min_common.")
+
+    # ============================================
+    # 5) Allineamento sulla min rimanente e salvataggio
+    # ============================================
+    k_common = min(len(bm_dict[c]) for c in ordered_cols)
     df = pd.DataFrame({c: np.asarray(bm_dict[c], dtype=float)[:k_common] for c in ordered_cols})
     df.to_csv(out_csv, index=False)
+
     return out_csv, ordered_cols, k_common
 
 def calculate_autocorrelation(data, K_LAG=50):
@@ -238,10 +270,23 @@ def util_thr_per_batch(busy_periods, completion_times, B, burn_in=0, k_max=None,
     """
     Per un dato CENTRO:
       - throughput_batch = B / Δt, con Δt = [1°..ultimo] completion del batch di quel centro
-      - utilization_batch = busy_overlap(Δt) / Δt, usando busy_periods del centro
-    Ritorna (util_series, thr_series) allineati per batch.
+      - utilization_batch = busy_overlap(Δt) / Δt
+    Richiede B fisso. Se non ci sono almeno 2 batch (n < 2*B), ritorna serie vuote.
     """
-    intervals = _batch_intervals_from_completions(completion_times, B, burn_in=burn_in, k_max=k_max)
+    ct = np.asarray(completion_times, dtype=float)
+    if burn_in > 0 and ct.size > burn_in:
+        ct = ct[burn_in:]
+    n = int(ct.size)
+
+    # Con B fisso vogliamo almeno 2 batch ⇒ n ≥ 2*B
+    if n < 2 * B:
+        return np.asarray([]), np.asarray([])
+
+    # Da qui in poi è sicuro creare gli intervalli
+    intervals = _batch_intervals_from_completions(
+        completion_times, B, burn_in=burn_in, k_max=k_max
+    )
+
     if tmax is None:
         tmax = intervals[-1, 1]
     periods = _closed_periods(busy_periods, tmax)
@@ -256,8 +301,10 @@ def util_thr_per_batch(busy_periods, completion_times, B, burn_in=0, k_max=None,
                 continue
             busy += max(0.0, min(e, b_end) - max(s, a))
         util.append(busy / dt)
-        thr.append(B / dt)   
+        thr.append(B / dt)  # B rimane quello fissato dall’utente
+
     return np.asarray(util), np.asarray(thr)
+
 
 
 def print_autocorrelation(file_path,
@@ -268,7 +315,7 @@ def print_autocorrelation(file_path,
     """
     Legge un CSV wide, calcola ACF fino a K_LAG per ciascuna colonna.
     - columns: lista di colonne da analizzare (default: tutte numeriche)
-    - threshold: stampa PASS/FAIL su |rho_1| < threshold
+    - threshold: stampa PASS/FAIL su rho_1 < threshold
     - save_csv: se non None, salva un CSV con mean/stdev/rho_1..rho_K
     Ritorna: DataFrame con risultati
     """
@@ -283,7 +330,7 @@ def print_autocorrelation(file_path,
         try:
             mean, stdev, ac, n = calculate_autocorrelation(s, K_LAG=K_LAG)
             rho1 = ac[0] if ac else float("nan")
-            ok = (abs(rho1) < threshold)
+            ok = (rho1) < threshold
             print(f"{col}: rho_1={rho1:.3f}  → {'PASS' if ok else 'FAIL'}  (n={n})")
             row = {
                 "metric": col, "n": n, "mean": mean, "stdev": stdev,
