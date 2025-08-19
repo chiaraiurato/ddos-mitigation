@@ -11,7 +11,8 @@ from model.job import Job
 from model.processor_sharing_server import ProcessorSharingServer
 from model.mitigation_manager import MitigationManager
 from utils.checkpoint import _rt_mean_upto, _utilization_upto, _throughput_upto
-from engineering.statistics import batch_means, batch_means_cut_burn_in, make_batch_means_series
+from engineering.statistics import batch_means, export_bm_series_to_wide_csv, print_autocorrelation, util_thr_per_batch
+
 try:
     STOP_TRANSITORY = STOP_CONDITION_TRANSITORY
 except NameError:
@@ -20,7 +21,6 @@ except NameError:
     except NameError:
         STOP_TRANSITORY = STOP_CONDITION_FINITE_SIMULATION
 
-# CHECKPOINT
 try:
     CHECKPOINT_TRANSITORY = CHECKPOINT_TIME_TRANSITORY
 except NameError:
@@ -171,7 +171,7 @@ class DDoSSystem:
                 job = Job(self.metrics["total_arrivals"], arrival_time, None, is_legal)
                 self.mitigation_manager.handle_job(job)
 
-    # ---------------------- REPORT (finito) ----------------------
+    # ---------------------- REPORT  ----------------------
     def report_windowing(self):
         now = self.env.now
         self.web_server.update(now)
@@ -250,9 +250,130 @@ class DDoSSystem:
 
         print("\n==== END OF REPORT ====")
 
-        
-    
-    def report_bm(self):
+    def report_bm(self,
+              B: int = None,
+              K: int = None,
+              confidence: float = CONFIDENCE_LEVEL,
+              burn_in_rt: int = 0,
+              include_system: bool = False):
+        """
+        Stampa:
+        - CI (t) sui Response Time per centro con Batch Means classico (batch di B completamenti)
+        - CI (t) su Utilization e Throughput per centro usando la serie per-batch
+        Parametri:
+        B:           batch size (default = BATCH_SIZE)
+        K:           max num batch (default = N_BATCH) per i RT
+        confidence:  livello di confidenza (es. 0.95)
+        burn_in_rt:  # di completamenti da scartare prima di batchizzare gli RT
+        include_system: se True stampa anche 'System RT' (Web+Spike)
+        """
+        # --- setup e chiusura periodi aperti
+        B = B or BATCH_SIZE
+        K = K or N_BATCH
+        now = self.env.now
+
+        def _close_open_busy_periods(periods, now_):
+            if periods and periods[-1][1] is None:
+                periods[-1][1] = now_
+        self.web_server.update(now)
+        for s in self.spike_servers: s.update(now)
+        center = self.mitigation_manager.center
+        center.update(now)
+        _close_open_busy_periods(self.web_server.busy_periods, now)
+        for s in self.spike_servers:
+            _close_open_busy_periods(s.busy_periods, now)
+        _close_open_busy_periods(center.busy_periods, now)
+
+        # --- helper CI ---
+        def _print_ci(label, samples, *, batch_size, n_batches, conf, burn_in=0):
+            try:
+                mean, hw = batch_means(
+                    samples,
+                    batch_size=batch_size,
+                    n_batches=n_batches,
+                    confidence=conf,
+                    burn_in=burn_in
+                )
+                print(f"{label}: {mean:.6f} ± {hw:.6f} ({int(conf*100)}% CI)")
+            except Exception as e:
+                print(f"{label}: errore - {e}")
+
+        print("\n==== SIMULATION COMPLETE ====")
+        print(f"Total time: {now:.4f}")
+        print(f"Arrivals: {self.metrics['total_arrivals']}")
+        print(f"Lecite: {self.metrics['legal_arrivals']}, Illecite: {self.metrics['illegal_arrivals']}")
+        print(f"Mitigation completions: {self.metrics['mitigation_completions']}")
+        print(f"False positives (dropped): {self.metrics['false_positives']}")
+        print(f"  Di cui lecite: {self.metrics['false_positives_legal']}")
+        print(f"Total discarded jobs: {len(self.metrics.get('discarded_detail', []))}")
+
+        # ====== 1) CI sui Response Time  ======
+        print("\n======== INTERVALLI DI CONFIDENZA (Batch Means sui RT) ========")
+
+        # Web
+        _print_ci("Web RT",
+                self.web_server.completed_jobs,
+                batch_size=B, n_batches=K, conf=confidence, burn_in=burn_in_rt)
+
+        # Spike-i
+        for i, srv in enumerate(self.spike_servers):
+            _print_ci(f"Spike-{i} RT",
+                    srv.completed_jobs,
+                    batch_size=B, n_batches=K, conf=confidence, burn_in=burn_in_rt)
+
+        # Mitigation
+        _print_ci("Mitigation RT",
+                center.completed_jobs,
+                batch_size=B, n_batches=K, conf=confidence, burn_in=burn_in_rt)
+
+        # (Opzionale) System RT = Web + Spike
+        # if include_system:
+        #     sys_rts = list(self.web_server.completed_jobs)
+        #     for s in self.spike_servers:
+        #         sys_rts.extend(s.completed_jobs)
+        #     _print_ci("System RT",
+        #             sys_rts,
+        #             batch_size=B, n_batches=K, conf=confidence, burn_in=burn_in_rt)
+
+        # ====== 2) CI su Utilization e Throughput (serie per-batch) ======
+        print("\n======== INTERVALLI DI CONFIDENZA (Utilization / Throughput per batch) ========")
+
+        def _print_util_thr_ci_for(label_prefix, busy_periods, completion_times):
+            # Costruisco la serie per-batch usando lo stesso B dei RT.
+            util_series, thr_series = util_thr_per_batch(
+                busy_periods,
+                completion_times,
+                B=B,
+                burn_in=burn_in_rt,  
+                k_max=None,
+                tmax=now
+            )
+            # t-CI direttamente sulla serie per-batch
+            _print_ci(f"{label_prefix} Utilization",
+                    util_series, batch_size=1, n_batches=None, conf=confidence)
+            _print_ci(f"{label_prefix} Throughput",
+                    thr_series, batch_size=1, n_batches=None, conf=confidence)
+
+        # Web
+        _print_util_thr_ci_for("Web",
+                            self.web_server.busy_periods,
+                            self.web_server.completion_times)
+
+        # Spike-i
+        for i, srv in enumerate(self.spike_servers):
+            _print_util_thr_ci_for(f"Spike-{i}",
+                                srv.busy_periods,
+                                srv.completion_times)
+
+        # Mitigation
+        _print_util_thr_ci_for("Mitigation",
+                            center.busy_periods,
+                            center.completion_times)
+
+        print("\n==== END OF REPORT ====")
+
+
+    def report_single_run(self):
         now = self.env.now
         self.web_server.update(now)
         for s in self.spike_servers: s.update(now)
@@ -262,14 +383,6 @@ class DDoSSystem:
         def close_open_busy_periods(periods, now_):
             if periods and periods[-1][1] is None:
                 periods[-1][1] = now_
-        def _print_bm_ci(label, series, batch_size, n_batches, confidence=CONFIDENCE_LEVEL, burn_in=0):
-            try:
-                m, hw = batch_means_cut_burn_in(series, batch_size=batch_size, n_batches=n_batches,
-                                    confidence=confidence, burn_in=burn_in)
-                print(f"{label}: {m:.6f} ± {hw:.6f} ({int(confidence*100)}% CI)")
-            except Exception as e:
-                print(f"{label}: errore batch means - {e}")
-
         close_open_busy_periods(self.web_server.busy_periods, now)
         for s in self.spike_servers:
             close_open_busy_periods(s.busy_periods, now)
@@ -286,76 +399,23 @@ class DDoSSystem:
         discarded = self.metrics.get("discarded_detail", [])
         print(f"Total discarded jobs: {len(discarded)}")
 
-        
-        print("\n======== INTERVALLI DI CONFIDENZA (Batch Means sui RT) ========")
-        burn_in_rt = 0  # per la run finita; per l’orizzonte infinito useremo un parametro dedicato
-        # Web
-        _print_bm_ci("Web RT", self.web_server.completed_jobs, BATCH_SIZE, N_BATCH, CONFIDENCE_LEVEL, burn_in=burn_in_rt)
+        def stats(name, server):
+            if getattr(server, "completed_jobs", None) and server.completed_jobs:
+                avg_rt = np.mean(server.completed_jobs)
+                print(f"{name} Completions: {server.total_completions}")
+                print(f"  Lecite  : {server.legal_completions}")
+                print(f"  Illecite: {server.illegal_completions}")
+                print(f"{name} Avg Resp Time: {avg_rt:.6f}")
+                print(f"{name} Utilization: {server.busy_time / now:.6f}")
+                print(f"{name} Throughput: {server.total_completions / now:.6f}")
+            else:
+                print(f"{name} Completions: 0")
 
-        # Spike-i
+        stats("Web", self.web_server)
         for i, server in enumerate(self.spike_servers):
-            _print_bm_ci(f"Spike-{i} RT", server.completed_jobs, BATCH_SIZE, N_BATCH, CONFIDENCE_LEVEL, burn_in=burn_in_rt)
-
-        # Mitigation
-        _print_bm_ci("Mitigation RT", center.completed_jobs, BATCH_SIZE, N_BATCH, CONFIDENCE_LEVEL, burn_in=burn_in_rt)
-
-        # System (Web+Spike)
-        sys_rts = list(self.web_server.completed_jobs)
-        for s in self.spike_servers:
-            sys_rts.extend(s.completed_jobs)
-        _print_bm_ci("System RT", sys_rts, BATCH_SIZE, N_BATCH, CONFIDENCE_LEVEL, burn_in=burn_in_rt)
-
-        print("\n==== END OF REPORT ====")
-
-def export_bm_series_for_acs(system,
-                             B: int,
-                             out_dir: str = "acs_input",
-                             burn_in_rt: int = 0,
-                             include_per_job: bool = False,
-                             k_max=None):
-    """
-    Scrive file .dat con la SERIE delle medie di batch per le metriche RT:
-      - web_rt_B<B>.dat
-      - mit_rt_B<B>.dat
-      - system_rt_B<B>.dat
-      - spike<i>_rt_B<B>.dat per ogni spike presente
-    Opzionale: scrive anche le serie per-job:
-      - web_rt_perjob.dat, mit_rt_perjob.dat, system_rt_perjob.dat, spike<i>_rt_perjob.dat
-    Ogni riga del file è un singolo valore (come vuole acs.py).
-    """
-    os.makedirs(out_dir, exist_ok=True)
-
-    center = system.mitigation_manager.center
-
-    # Serie per-job
-    web_rt   = list(system.web_server.completed_jobs)
-    mit_rt   = list(center.completed_jobs)
-    spike_rts = [list(s.completed_jobs) for s in system.spike_servers]
-    sys_rt = list(web_rt)
-    for s in system.spike_servers:
-        sys_rt.extend(s.completed_jobs)
-
-    items = [("web_rt", web_rt),
-             ("mit_rt", mit_rt),
-             ("system_rt", sys_rt)]
-    for i, r in enumerate(spike_rts):
-        items.append((f"spike{i}_rt", r))
-
-    def _dump(path, seq):
-        with open(path, "w") as f:
-            for v in seq:
-                f.write(f"{float(v)}\n")
-
-    for name, series in items:
-        # opzionale: per-job
-        if include_per_job:
-            _dump(os.path.join(out_dir, f"{name}_perjob.dat"), series)
-
-        # batch-means per B scelto
-        means = make_batch_means_series(series, b=B, burn_in=burn_in_rt, k_max=k_max)
-        _dump(os.path.join(out_dir, f"{name}_B{B}.dat"), means)
-
-    print(f"[OK] Esportati i file .dat in '{out_dir}' per B={B} (burn-in={burn_in_rt}, k_max={k_max})")
+            stats(f"Spike-{i}", server)
+        stats("Mitigation", center)
+        print(f"Mitigation Discarded : {self.metrics.get('discarded_mitigation', 0)}")
 
 
 def run_simulation(scenario:str, mode: str, enable_windowing: bool, arrival_p=None, arrival_l1=None, arrival_l2=None):
@@ -369,11 +429,12 @@ def run_simulation(scenario:str, mode: str, enable_windowing: bool, arrival_p=No
     env = simpy.Environment()
     system = DDoSSystem(env, mode, arrival_p, arrival_l1, arrival_l2)
     env.run()
+    system.report_single_run()
     if(enable_windowing == True):
         system.report_windowing()
-
-    row = system.make_csv_row(scenario, arrival_p, arrival_l1, arrival_l2)
-    append_row("results_standard.csv", row)
+    # da capire se bisogna metterlo
+    # row = system.make_csv_row(scenario, arrival_p, arrival_l1, arrival_l2)
+    # append_row("results_standard.csv", row)
 
 def transitory_fieldnames(max_spikes: int):
     base = [
@@ -415,7 +476,7 @@ def infinite_fieldnames(max_spikes: int):
                  f"spike{i}_completions"]
     return base
 
-def run_finite_sim(mode: str, enable_batch_means: bool, scenario: str, out_csv: str):
+def run_finite_horizon(mode: str, scenario: str, out_csv: str):
     if os.path.exists(out_csv):
         os.remove(out_csv)
 
@@ -492,15 +553,15 @@ def run_finite_sim(mode: str, enable_batch_means: bool, scenario: str, out_csv: 
 
     return all_logs
 
-def run_infinite_horizon_bm_to_csv(scenario: str,
-                                   mode: str,
-                                   out_csv: str,
-                                   burn_in_rt: int,
-                                   arrival_p=None, arrival_l1=None, arrival_l2=None):
+
+def run_infinite_horizon(mode: str,
+                         out_csv: str,
+                         out_acs: str,
+                         burn_in: int = 0,
+                         arrival_p=None, arrival_l1=None, arrival_l2=None):
     """
-    Una singola run 'infinita' che produce un'unica riga CSV:
-    - RT: Batch Means con CI (no finestre)
-    - Util/Throughput: stime puntuali (totBusy/now, completamenti/now)
+    Esegue la simulazione a orizzonte infinito tramite il metodo dei Batch Means, 
+    calcolando le autocorrelazioni (ACF) sulle metriche di interesse.
     """
     if mode not in ("verification", "standard"):
         raise ValueError("mode must be 'verification' or 'standard'")
@@ -510,137 +571,33 @@ def run_infinite_horizon_bm_to_csv(scenario: str,
         arrival_l1 = ARRIVAL_L1
         arrival_l2 = ARRIVAL_L2
 
-    # pulizia file
-    if os.path.exists(out_csv):
-        os.remove(out_csv)
-
     env = simpy.Environment()
     system = DDoSSystem(env, mode, arrival_p, arrival_l1, arrival_l2)
     env.run()
-    export_bm_series_for_acs(
-    system,
-    B=BATCH_SIZE,                 
-    out_dir="acs_input",  
-    burn_in_rt=5000,       
-    include_per_job=False, 
-    k_max=None             
+    system.report_bm()
+
+    # 1) Esporta le misurazioni per-batch (eg. RT/Util/Thr per CENTRO)
+    csv_path, cols, k = export_bm_series_to_wide_csv(
+        system,
+        B=BATCH_SIZE,
+        out_csv=out_csv,           
+        burn_in=burn_in,
+        k_max=None     
     )
-    now = env.now
-    center = system.mitigation_manager.center
+    print(f"[OK] bm_series in {csv_path} ({k} righe). Colonne: {cols}")
 
+    # 2) Calcola ACF (one-pass) per ogni colonna del CSV e salva il report 
     
-    need = burn_in_rt + BATCH_SIZE * N_BATCH
-    def _check_len(name, seq):
-        if len(seq) < need:
-            raise ValueError(f"{name}: completamenti insufficienti per BM (len={len(seq)} < {need}). "
-                             f"Aumenta N_ARRIVALS o riduci BATCH_SIZE/N_BATCH/burn_in_rt.")
+    res_df = print_autocorrelation(
+        file_path=csv_path,
+        columns=cols,     
+        K_LAG=50,
+        threshold=0.2,
+        save_csv=out_acs
+    )
+    print(f"[OK] ACF salvata in: {out_acs}")
 
-   
-    web_rt    = list(system.web_server.completed_jobs)
-    mit_rt    = list(center.completed_jobs)
-    spike_rts = [list(s.completed_jobs) for s in system.spike_servers]
-    sys_rt    = list(web_rt)
-    for s in system.spike_servers:
-        sys_rt.extend(s.completed_jobs)
-
-    # check quantità
-    _check_len("Web RT", web_rt)
-    _check_len("Mitigation RT", mit_rt)
-    for i, r in enumerate(spike_rts):
-        _check_len(f"Spike-{i} RT", r)
-    _check_len("System RT", sys_rt)
-
-    
-    def _bm_rt(x): 
-        return batch_means_cut_burn_in(x, batch_size=BATCH_SIZE, n_batches=N_BATCH,
-                                       confidence=CONFIDENCE_LEVEL, burn_in=burn_in_rt)
-
-    web_m, web_hw = _bm_rt(web_rt)
-    mit_m, mit_hw = _bm_rt(mit_rt)
-    sys_m, sys_hw = _bm_rt(sys_rt)
-    spike_stats = [ _bm_rt(r) for r in spike_rts ]
-
-    # --- stime puntuali util/thr
-    def _util(srv): return (srv.busy_time / now) if now > 0 else 0.0
-    def _thr(srv):  return (srv.total_completions / now) if now > 0 else 0.0
-
-    web_util_p, web_thr_p = _util(system.web_server), _thr(system.web_server)
-    mit_util_p, mit_thr_p = _util(center), _thr(center)
-
-    # --- quote globali
-    tot_arr = max(1, system.metrics["total_arrivals"])
-    proc_leg = int(system.metrics.get("processed_legal", 0))
-    proc_illeg = int(system.metrics.get("processed_illegal", 0))
-
-    web_leg = int(system.web_server.legal_completions)
-    web_illeg = int(system.web_server.illegal_completions)
-    spike_leg = sum(int(s.legal_completions) for s in system.spike_servers)
-    spike_illeg = sum(int(s.illegal_completions) for s in system.spike_servers)
-    comp_leg = web_leg + spike_leg
-    comp_illeg = web_illeg + spike_illeg
-    comp_tot = max(1, comp_leg + comp_illeg)
-
-    fieldnames = infinite_fieldnames(MAX_SPIKE_NUMBER)
-    row = {
-        "scenario": scenario,
-        "total_time": now, "total_arrivals": system.metrics["total_arrivals"],
-        "burn_in_rt": burn_in_rt, "batch_size": BATCH_SIZE, "n_batches": N_BATCH, "confidence": CONFIDENCE_LEVEL,
-
-        "web_rt_mean_bm": web_m, "web_rt_ci_hw": web_hw,
-        "web_util_point": web_util_p, "web_throughput_point": web_thr_p,
-
-        "mit_rt_mean_bm": mit_m, "mit_rt_ci_hw": mit_hw,
-        "mit_util_point": mit_util_p, "mit_throughput_point": mit_thr_p,
-
-        "system_rt_mean_bm": sys_m, "system_rt_ci_hw": sys_hw,
-
-        "illegal_share": system.metrics["illegal_arrivals"] / tot_arr,
-        "processed_legal_share": proc_leg / tot_arr,
-        "processed_illegal_share": proc_illeg / tot_arr,
-        "completed_legal_share": comp_leg / tot_arr,
-        "completed_illegal_share": comp_illeg / tot_arr,
-        "completed_legal_of_completed_share": comp_leg / comp_tot,
-        "completed_illegal_of_completed_share": comp_illeg / comp_tot,
-
-        "spikes_count": len(system.spike_servers),
-    }
-
-    # spike-i
-    for i in range(MAX_SPIKE_NUMBER):
-        if i < len(system.spike_servers):
-            s = system.spike_servers[i]
-            m, hw = spike_stats[i]
-            row[f"spike{i}_rt_mean_bm"] = m
-            row[f"spike{i}_rt_ci_hw"]   = hw
-            row[f"spike{i}_util_point"] = _util(s)
-            row[f"spike{i}_thr_point"]  = _thr(s)
-            row[f"spike{i}_completions"] = s.total_completions
-        else:
-            row[f"spike{i}_rt_mean_bm"] = None
-            row[f"spike{i}_rt_ci_hw"]   = None
-            row[f"spike{i}_util_point"] = None
-            row[f"spike{i}_thr_point"]  = None
-            row[f"spike{i}_completions"] = 0
-
-    append_row_stable(out_csv, row, fieldnames)
-    print(f"[OK] Batch means salvati in: {out_csv}")
-
-
-def run_infinite_horizon(mode: str,
-                         enable_batch_means: bool,
-                         out_csv: str = "results_infinite_bm.csv",
-                         burn_in_rt: int = 0,
-                         arrival_p=None, arrival_l1=None, arrival_l2=None,
-                         scenario: str = "infinite_run"):
-    """
-    Se enable_batch_means=True -> delega a run_infinite_horizon_bm_to_csv (CSV, no stampe).
-    Altrimenti -> run classica e scrive la riga 'point-estimates' su results_standard.csv.
-    """
-    if enable_batch_means:
-        return run_infinite_horizon_bm_to_csv(
-            scenario=scenario, mode=mode, out_csv=out_csv, burn_in_rt=burn_in_rt,
-            arrival_p=arrival_p, arrival_l1=arrival_l1, arrival_l2=arrival_l2
-        )
+    return res_df
 
 
 
