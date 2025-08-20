@@ -1,6 +1,6 @@
 # Batch Means Parameters
 BATCH_SIZE          = 1256
-N_BATCH             = 128
+N_BATCH             = 64
 CONFIDENCE_LEVEL    = 0.95
 BURN_IN             = 1000  
 

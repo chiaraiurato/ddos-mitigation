@@ -1,0 +1,18 @@
+web_rt: rho_1=-0.109  
+web_util: rho_1=0.000 
+web_thr: rho_1=-0.029 
+
+spike0_rt: rho_1=0.196
+spike0_util: rho_1=0.000
+spike0_thr: rho_1=-0.334
+
+
+mit_rt: rho_1=-0.018  
+mit_util: rho_1=-0.017
+mit_thr: rho_1=-0.019 
+
+
+
+
+
+
