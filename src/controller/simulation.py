@@ -5,13 +5,13 @@ import os
 from library.rngs import random, plantSeeds, getSeed, selectStream
 from engineering.costants import *
 from engineering.distributions import get_interarrival_time
-from engineering.statistics import batch_means, window_util_thr
 from utils.csv_writer import append_row, append_row_stable
 from model.job import Job
 from model.processor_sharing_server import ProcessorSharingServer
 from model.mitigation_manager import MitigationManager
 from utils.checkpoint import _rt_mean_upto, _utilization_upto, _throughput_upto
-from engineering.statistics import batch_means, export_bm_series_to_wide_csv, print_autocorrelation, util_thr_per_batch
+from engineering.statistics import batch_means, export_bm_series_to_wide_csv, print_autocorrelation, util_thr_per_batch, window_util_thr
+
 
 try:
     STOP_TRANSITORY = STOP_CONDITION_TRANSITORY
@@ -31,9 +31,11 @@ except NameError:
 
 
 class DDoSSystem:
-    def __init__(self, env, mode, arrival_p, arrival_l1, arrival_l2):
+    def __init__(self, env, mode, arrival_p, arrival_l1, arrival_l2, variant):
         self.env = env
         self.mode = mode
+        self.variant = variant
+
         self.arrival_p = arrival_p
         self.arrival_l1 = arrival_l1
         self.arrival_l2 = arrival_l2
@@ -52,7 +54,7 @@ class DDoSSystem:
         }
 
         self.mitigation_manager = MitigationManager(
-            env, self.web_server, self.spike_servers, self.metrics, self.mode
+            env, self.web_server, self.spike_servers, self.metrics, self.mode, variant=self.variant
         )
 
         self.env.process(self.arrival_process(mode))
@@ -65,6 +67,10 @@ class DDoSSystem:
             s.update(when)
         center = self.mitigation_manager.center
         center.update(when)
+
+        # (se presente) chiudi periods Analysis
+        if self.mitigation_manager.analysis_center is not None:
+            self.mitigation_manager.analysis_center.update(when)
 
         row = {
             "replica": int(replica_id) if replica_id is not None else None,
@@ -80,13 +86,22 @@ class DDoSSystem:
             "mit_rt_mean": _rt_mean_upto(center.completed_jobs, center.completion_times, when),
             "mit_util": _utilization_upto(center.busy_periods, when),
             "mit_throughput": _throughput_upto(center.completion_times, when),
+        }
 
-            # Contatori globali
+        # (facoltativo) Analysis nel CSV se necessario
+        if self.mitigation_manager.analysis_center is not None:
+            ac = self.mitigation_manager.analysis_center
+            row["analysis_rt_mean"] = _rt_mean_upto(ac.completed_jobs, ac.completion_times, when)
+            row["analysis_util"] = _utilization_upto(ac.busy_periods, when)
+            row["analysis_throughput"] = _throughput_upto(ac.completion_times, when)
+
+        # Contatori globali
+        row.update({
             "arrivals_so_far": int(self.metrics["total_arrivals"]),
             "false_positives_so_far": int(self.metrics.get("false_positives", 0)),
             "mitigation_completions_so_far": int(self.metrics.get("mitigation_completions", 0)),
             "spikes_count": int(len(self.spike_servers)),
-        }
+        })
 
         # Per-spike
         for i in range(len(self.spike_servers)):
@@ -143,6 +158,10 @@ class DDoSSystem:
         elif mode in ("transitory", "finite simulation"):
             interarrival_mode = "standard"
             stop_on_arrivals = False
+        elif mode == "infinite simulazion":
+            arrivals = N_ARRIVALS_BATCH_MEANS
+            interarrival_mode = "standard"
+            stop_on_arrivals = True
         else:  # "standard"
             arrivals = N_ARRIVALS
             interarrival_mode = "standard"
@@ -171,7 +190,6 @@ class DDoSSystem:
                 job = Job(self.metrics["total_arrivals"], arrival_time, None, is_legal)
                 self.mitigation_manager.handle_job(job)
 
-    # ---------------------- REPORT  ----------------------
     def report_windowing(self):
         now = self.env.now
         self.web_server.update(now)
@@ -372,7 +390,7 @@ class DDoSSystem:
 
         print("\n==== END OF REPORT ====")
 
-
+    # ---------------------- REPORT  ----------------------
     def report_single_run(self):
         now = self.env.now
         self.web_server.update(now)
@@ -380,13 +398,24 @@ class DDoSSystem:
         center = self.mitigation_manager.center
         center.update(now)
 
-        def close_open_busy_periods(periods, now_):
-            if periods and periods[-1][1] is None:
-                periods[-1][1] = now_
-        close_open_busy_periods(self.web_server.busy_periods, now)
-        for s in self.spike_servers:
-            close_open_busy_periods(s.busy_periods, now)
-        close_open_busy_periods(center.busy_periods, now)
+        ac = self.mitigation_manager.analysis_center
+        if ac is not None:
+            ac.update(now)
+
+        # fun per chiudere intervalli busy (Web/Spike/Mitigation hanno già busy_periods)
+        def total_busy_time_of(obj):
+            # AnalysisCenter: somma per-core
+            if hasattr(obj, "core_busy_periods"):
+                total = 0.0
+                for periods in obj.core_busy_periods:
+                    for (a, b) in periods:
+                        if b is None:
+                            b = now
+                        if b > a:
+                            total += (b - a)
+                return total
+            # Altri centri
+            return getattr(obj, "busy_time", 0.0)
 
         print("\n==== SIMULATION COMPLETE ====")
         print(f"Total time: {now:.4f}")
@@ -400,13 +429,16 @@ class DDoSSystem:
         print(f"Total discarded jobs: {len(discarded)}")
 
         def stats(name, server):
+            # response time / throughput standard
             if getattr(server, "completed_jobs", None) and server.completed_jobs:
                 avg_rt = np.mean(server.completed_jobs)
+                busy_time = total_busy_time_of(server)
                 print(f"{name} Completions: {server.total_completions}")
-                print(f"  Lecite  : {server.legal_completions}")
-                print(f"  Illecite: {server.illegal_completions}")
+                if hasattr(server, "legal_completions"):
+                    print(f"  Lecite  : {server.legal_completions}")
+                    print(f"  Illecite: {server.illegal_completions}")
                 print(f"{name} Avg Resp Time: {avg_rt:.6f}")
-                print(f"{name} Utilization: {server.busy_time / now:.6f}")
+                print(f"{name} Utilization: {busy_time / now:.6f}")
                 print(f"{name} Throughput: {server.total_completions / now:.6f}")
             else:
                 print(f"{name} Completions: 0")
@@ -415,10 +447,26 @@ class DDoSSystem:
         for i, server in enumerate(self.spike_servers):
             stats(f"Spike-{i}", server)
         stats("Mitigation", center)
+
+        if ac is not None:
+            stats("Analysis", ac)
+            print(f"Analysis capacity drops : {self.metrics.get('discarded_analysis_capacity', 0)}")
+            print(f"ML  drop illicit (TN)   : {self.metrics.get('ml_drop_illicit', 0)}")
+            print(f"ML  drop legal   (FN)   : {self.metrics.get('ml_drop_legal', 0)}")
+            print(f"ML  pass illicit (FP)   : {self.metrics.get('ml_pass_illicit', 0)}")
+            print(f"ML  pass legal   (TP)   : {self.metrics.get('ml_pass_legal', 0)}")
+
         print(f"Mitigation Discarded : {self.metrics.get('discarded_mitigation', 0)}")
 
+    # (le altre funzioni report_windowing / report_bm le puoi aggiornare in seguito)
+    # -------------------------------------------------------------------------
 
-def run_simulation(scenario:str, mode: str, enable_windowing: bool, arrival_p=None, arrival_l1=None, arrival_l2=None):
+
+def run_simulation(scenario: str, mode: str, model: str, enable_windowing: bool, 
+                   arrival_p=None, arrival_l1=None, arrival_l2=None):
+    
+    print("Model " + model)
+
     if mode not in ("verification", "standard"):
         raise ValueError("mode must be 'verification' or 'standard'")
     if arrival_p is None:
@@ -427,20 +475,20 @@ def run_simulation(scenario:str, mode: str, enable_windowing: bool, arrival_p=No
         arrival_l2 = ARRIVAL_L2
 
     env = simpy.Environment()
-    system = DDoSSystem(env, mode, arrival_p, arrival_l1, arrival_l2)
+    system = DDoSSystem(env, mode, arrival_p, arrival_l1, arrival_l2, variant=model)
     env.run()
     system.report_single_run()
     if(enable_windowing == True):
         system.report_windowing()
-    # da capire se bisogna metterlo
-    # row = system.make_csv_row(scenario, arrival_p, arrival_l1, arrival_l2)
-    # append_row("results_standard.csv", row)
+    # CSV: quando vorrai aggiungere le colonne del centro di analisi, estendiamo i fieldnames e l'append_row_stable
 
 def transitory_fieldnames(max_spikes: int):
     base = [
         "replica", "time",
         "web_rt_mean", "web_util", "web_throughput",
         "mit_rt_mean", "mit_util", "mit_throughput",
+        # NEW: colonne opzionali per Analysis Center (se attivo)
+        "ana_rt_mean", "ana_util", "ana_throughput",
         "system_rt_mean",
         "arrivals_so_far", "false_positives_so_far", "mitigation_completions_so_far",
         "spikes_count", "scenario", "mode", "is_final",
@@ -463,6 +511,7 @@ def infinite_fieldnames(max_spikes: int):
         "web_util_point", "web_throughput_point",
         "mit_rt_mean_bm", "mit_rt_ci_hw",
         "mit_util_point", "mit_throughput_point",
+        # TODO: aggiungere anche analysis_* quando estendiamo il BM per quel centro
         "system_rt_mean_bm", "system_rt_ci_hw",
         "illegal_share",
         "processed_legal_share", "processed_illegal_share",
@@ -560,7 +609,7 @@ def run_infinite_horizon(mode: str,
                          burn_in: int = 0,
                          arrival_p=None, arrival_l1=None, arrival_l2=None):
     """
-    Esegue la simulazione a orizzonte infinito tramite il metodo dei Batch Means, 
+    Esegue la simulazione a orizzonte infinito tramite il metodo dei Batch Means,
     calcolando le autocorrelazioni (ACF) sulle metriche di interesse.
     """
     if mode not in ("verification", "standard"):
@@ -574,25 +623,21 @@ def run_infinite_horizon(mode: str,
     env = simpy.Environment()
     system = DDoSSystem(env, mode, arrival_p, arrival_l1, arrival_l2)
     env.run()
-    #system.report_bm()
+    # system.report_bm()  # opzionale: abbiamo la versione con Analysis sopra
     print("\n==== START BATCH MEANS ====")
 
-
-    # 1) Esporta le misurazioni per-batch (eg. RT/Util/Thr per CENTRO)
     csv_path, cols, k = export_bm_series_to_wide_csv(
         system,
         B=BATCH_SIZE,
-        out_csv=out_csv,           
+        out_csv=out_csv,
         burn_in=burn_in,
-        k_max=None     
+        k_max=None
     )
     print(f"[OK] bm_series in {csv_path} ({k} righe). Colonne: {cols}")
 
-    # 2) Calcola ACF (one-pass) per ogni colonna del CSV e salva il report 
-    
     res_df = print_autocorrelation(
         file_path=csv_path,
-        columns=cols,     
+        columns=cols,
         K_LAG=50,
         threshold=0.2,
         save_csv=out_acs

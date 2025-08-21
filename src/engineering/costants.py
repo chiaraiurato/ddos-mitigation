@@ -2,11 +2,10 @@
 BATCH_SIZE          = 1256
 N_BATCH             = 64
 CONFIDENCE_LEVEL    = 0.95
-BURN_IN             = 1000  
+BURN_IN             = 1000
 
-
-# Parameters 
-# Source: Performance Engineering - Learning Through Applications Using JMT 
+# Parameters
+# Source: Performance Engineering - Learning Through Applications Using JMT
 ARRIVAL_P_VERIFICATION  = 0.03033
 ARRIVAL_L1_VERIFICATION = 0.4044
 ARRIVAL_L2_VERIFICATION = 12.9289
@@ -36,10 +35,10 @@ SERVICE_L1  = 0.3791
 SERVICE_L2  = 12.1208
 
 # Source: Typical mitigation time: ~1ms (Cisco)
-# Source: https://www.cisco.com/c/en/us/td/docs/security/secure-firewall/management-center/device-config/720/management-center-device-config-72/intrusion-performance.html
+# https://www.cisco.com/c/en/us/td/docs/security/secure-firewall/management-center/device-config/720/management-center-device-config-72/intrusion-performance.html
 MITIGATION_MEAN = 0.0011
+
 # Buffer capacity for M/M/1/K model
-# Typical enterprise firewall buffer sizes
 MITIGATION_CAPACITY = 1024
 
 # Verification
@@ -56,23 +55,22 @@ P_LECITO            = 0.1
 MAX_WEB_CAPACITY    = 20
 MAX_SPIKE_CAPACITY  = 20
 SCALE_THRESHOLD     = 20
-
-MAX_SPIKE_NUMBER = 4
+MAX_SPIKE_NUMBER    = 4
 
 # Arrivals Number
-# N_ARRIVALS = 2585120
-N_ARRIVALS              = 5000000
+N_ARRIVALS_BATCH_MEANS  = 5000000
+N_ARRIVALS              = 3000000
 N_ARRIVALS_VERIFICATION = 64628
 
 # Simulation Time
-MAX_SIMULATION_TIME     = 20000  
+MAX_SIMULATION_TIME     = 20000
 
-# Variable used for batch means
-TIME_WINDOW                         = 30.0          # seconds per time window
-TIME_WINDOWS_PER_BATCH_VALIDATION   = 32
-TIME_WINDOWS_PER_BATCH              = 8  # how many windows form a batch for CI on util/throughput
+# Variable used for batch means (windowing)
+TIME_WINDOW                       = 30.0  # seconds per time window
+TIME_WINDOWS_PER_BATCH_VALIDATION = 32
+TIME_WINDOWS_PER_BATCH            = 8     # how many windows form a batch for CI on util/throughput
 
-# Multistream 
+# Multistream
 RNG_SEED_VERIFICATION = 123456789
 RNG_SEED_STANDARD     = 42
 
@@ -82,14 +80,39 @@ RNG_STREAM_SERVICE_TIMES       = 2   # service time dei job (web/spike)
 RNG_STREAM_FALSE_POSITIVE      = 3
 RNG_STREAM_FEEDBACK            = 4
 
-# Valus for finite simulations
-REPLICATION_FACTOR_TRANSITORY   = 7
-SEEDS_TRANSITORY                = [123456789, 653476254, 734861870, 976578247, 364519872, 984307865, 546274352]
-CHECKPOINT_TIME_TRANSITORY      = 500
-STOP_CONDITION_TRANSITORY       = 100000
+# Values for finite simulations
+RNG_STREAM                              = 5
+REPLICATION_FACTOR_TRANSITORY           = 7
+SEEDS_TRANSITORY                        = [123456789, 653476254, 734861870, 976578247, 364519872, 984307865, 546274352]
+CHECKPOINT_TIME_TRANSITORY              = 500
+STOP_CONDITION_TRANSITORY               = 100000
 
-# Parameters for finite simulation
-RNG_STREAM                              =   5
-REPLICATION_FACTORY_FINITE_SIMULATION   =   15
-CHECKPOINT_TIME_FINITE_SIMULATION       =   100
-STOP_CONDITION_FINITE_SIMULATION        =   18000     # 5 hours
+REPLICATION_FACTORY_FINITE_SIMULATION   = 15
+CHECKPOINT_TIME_FINITE_SIMULATION       = 100
+STOP_CONDITION_FINITE_SIMULATION        = 18000  # 5 hours
+
+# --- Model variant toggle ---
+MODEL_VARIANT = "baseline"  # "baseline" | "ml_analysis"
+
+# --- Analysis Center (global center numbers) ---
+ANALYSIS_CORES = 4
+
+# Centro complessivo (dato)
+ANALYSIS_MU_CENTER = 1629.77           # job/s
+ANALYSIS_ES_CENTER = 1.0 / ANALYSIS_MU_CENTER  # ≈ 0.00061358 s
+
+# Derivati PER-CORE (M/M/c/c con c=ANALYSIS_CORES)
+ANALYSIS_MU_CORE = ANALYSIS_MU_CENTER / ANALYSIS_CORES     # 407.4425 job/s
+ANALYSIS_ES_CORE = 1.0 / ANALYSIS_MU_CORE                  # ~0.002455 s
+
+# Nessuna coda: capacità = n core (sistema a perdita M/M/c/c)
+ANALYSIS_CAPACITY = ANALYSIS_CORES
+
+# --- ML classification (default) ---
+P_TPR_ML = 0.9938
+P_TNR_ML = 0.9938
+
+# --- RNG streams nuovi ---
+RNG_STREAM_ANALYSIS_SERVICE = 6
+RNG_STREAM_ML_DECISION      = 7
+
