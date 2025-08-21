@@ -1,0 +1,61 @@
+Avvio risoluzione catena di Markov – modello MIGLIORATIVO (con Analysis Center ML)...
+Spazio degli stati costruito: 11025 stati (dim: 5×5×21×21)
+Costruzione matrice generatrice Q (11025×11025)...
+  Stato 0/11025
+  Stato 1000/11025
+  Stato 2000/11025
+  Stato 3000/11025
+  Stato 4000/11025
+  Stato 5000/11025
+  Stato 6000/11025
+  Stato 7000/11025
+  Stato 8000/11025
+  Stato 9000/11025
+  Stato 10000/11025
+  Stato 11000/11025
+Risoluzione sistema lineare per probabilità stazionarie...
+Calcolo metriche di performance...
+
+======================================================================
+MODELLO ANALITICO – Variante MIGLIORATIVA (con Analysis Center ML)
+======================================================================
+
+UTILIZZAZIONI:
+  Mitigation   : 0.007334
+  Analysis     : 0.004050  
+  Web          : 0.110838
+  Spike        : 0.000000
+
+THROUGHPUT (job/s):
+  Mitigation   : 6.666666
+  Analysis     : 6.599999
+  Web          : 0.692736
+  Spike        : 0.000000
+
+TEMPI DI RISPOSTA (s):
+  Mitigation   : 0.001108
+  Analysis     : 0.002454
+  Web          : 0.179945
+  Spike        : 0.000000
+
+PROBABILITÀ DI ROUTING (condizionate al completamento del centro):
+  Mitigation → ...
+    to Analysis    : 0.990000 (99.00%)
+    drop (FP)      : 0.010000 (1.00%)
+    drop (AnaFull) : 0.000000 (0.00%)
+  Analysis → ...
+    to Web         : 0.104960 (10.50%)
+    to Spike       : 0.000000 (0.00%)
+    drop (ML)      : 0.895040 (89.50%)
+    drop (Full)    : 0.000000 (0.00%)
+
+ALTRE METRICHE:
+  P(Mitigation pieno) : 0.000000
+  P(Analysis pieno)   : 0.000000
+  λ_eff (ingresso)    : 6.666666 job/s
+  Drop @Mit(FP)       : 0.066667 job/s
+  Drop @Ana(cap)      : 0.000000 job/s
+  Drop @ML(class)     : 5.907263 job/s
+  Drop @downstream    : 0.000000 job/s
+
+Tempo di esecuzione: 11.47 s

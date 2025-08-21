@@ -1,0 +1,25 @@
+======== INTERVALLI DI CONFIDENZA ========
+
+-- Web Server --
+Response Time:                           : 0.182167 ± 0.004502 (95% CI)
+Utilization:                             : 0.108293 ± 0.002674 (95% CI)
+Throughput:                              : 0.680729 ± 0.016281 (95% CI)
+
+-- Spike Server --
+Spike-0:
+Response Time:                           : 0.000000 ± 0.000000 (95% CI)
+Utilization:                             : 0.000000 ± 0.000000 (95% CI)
+Throughput:                              : 0.000000 ± 0.000000 (95% CI)
+
+-- Mitigation Center --
+Response Time:                           : 0.001098 ± 0.000012 (95% CI)
+Utilization:                             : 0.007301 ± 0.000078 (95% CI)
+Throughput:                              : 6.643646 ± 0.048400 (95% CI)
+
+-- Analysis Center --
+Response Time:                           : 0.002460 ± 0.000016 (95% CI)
+Utilization:                             : 0.004041 ± 0.000039 (95% CI)
+Throughput:                              : 6.575104 ± 0.047163 (95% CI)
+
+
+

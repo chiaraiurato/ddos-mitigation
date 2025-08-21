@@ -59,7 +59,7 @@ MAX_SPIKE_NUMBER    = 4
 
 # Arrivals Number
 N_ARRIVALS_BATCH_MEANS  = 5000000
-N_ARRIVALS              = 3000000
+N_ARRIVALS              = 1000000
 N_ARRIVALS_VERIFICATION = 64628
 
 # Simulation Time
@@ -108,9 +108,9 @@ ANALYSIS_ES_CORE = 1.0 / ANALYSIS_MU_CORE                  # ~0.002455 s
 # Nessuna coda: capacità = n core (sistema a perdita M/M/c/c)
 ANALYSIS_CAPACITY = ANALYSIS_CORES
 
-# --- ML classification (default) ---
-P_TPR_ML = 0.9938
-P_TNR_ML = 0.9938
+# --- ML classification ---
+P_DROP_ML = 0.89504
+P_PASS = 1 - P_DROP_ML
 
 # --- RNG streams nuovi ---
 RNG_STREAM_ANALYSIS_SERVICE = 6

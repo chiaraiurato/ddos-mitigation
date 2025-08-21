@@ -1,3 +1,4 @@
+# markov_ddos_ml.py
 import numpy as np
 import scipy.sparse as sp
 from scipy.sparse.linalg import spsolve
@@ -6,66 +7,46 @@ import time
 
 class DDoSMarkovChain:
     """
-    Modello analitico (CTMC) del sistema DDoS con:
-      - Mitigation (M/M/1/K)
-      - Analysis ML (M/M/c/c, c=4, NO queue)
-      - Web (Processor Sharing)
-      - Spike (Processor Sharing)
+    Variante MIGLIORATIVA con centro di ANALISI (M/M/c/c, NO coda).
     Stato: (i, a, w, s)
-      i = job in Mitigation           ∈ {0..K_mitigation}
-      a = job in Analysis (occupati)  ∈ {0..K_analysis}  (= c)
-      w = job nel Web                 ∈ {0..K_web}
-      s = job nello Spike             ∈ {0..K_spike}
+      i = jobs in Mitigation       ∈ [0..K_mit]
+      a = jobs in Analysis (ML)    ∈ [0..K_ana]
+      w = jobs in Web (PS)         ∈ [0..K_web]
+      s = jobs in Spike (PS)       ∈ [0..K_spi]
     """
 
     def __init__(self):
-        # ====== Tassi di arrivo e servizio ======
-        # Arrivi globali
-        self.lambda_arrival = 6.666666  # job/s
+        # ---- Parametri di base (unità: 1/s) ----
+        self.lambda_arrival = 6.666666  # arrivi al sistema
+        self.mu_mitigation  = 909.0     # PS totale del Mitigation (M/M/1/K)
 
-        # Mitigation
-        self.mu_mitigation = 909.0      # job/s  (centro veloce)
+        self.mu_web   = 6.25            # PS (totale) del Web
+        self.mu_spike = 6.25            # PS (totale) dello Spike
 
-        # Analysis ML (c=4 core senza coda): per-core
-        self.c_analysis = 4
-        self.mu_analysis_core = 407.4425  # job/s per core (1629.77 / 4)
+        # ---- Analysis Center (M/M/c/c) ----
+        self.c_ana        = 4                  # # core
+        self.mu_ana_core  = 407.4425           # tasso per-core
+        # NB: tasso istantaneo totale = mu_ana_core * min(a, c_ana)
 
-        # Web & Spike (Processor Sharing)
-        self.mu_web = 6.25
-        self.mu_spike = 6.25
+        # ---- Capacità ----
+        self.K_mitigation = 4
+        self.K_analysis   = self.c_ana         # sistema a perdita, capacità = #core
+        self.K_web        = 20
+        self.K_spike      = 20
 
-        # ====== Capacità ======
-        self.K_mitigation = 4           # M/M/1/K (buffer K, o server con capacità K?)
-        self.K_analysis = self.c_analysis  # M/M/c/c (blocking)
-        self.K_web = 20
-        self.K_spike = 20
+        # ---- Probabilità mix e classificatore ----
+        self.p_fp       = 0.01                 # false positive al Mitigation
 
-        # ====== Probabilità di classi ======
-        # mix di traffico
-        self.p_lecito = 0.10
-        self.p_illecito = 0.90
-
-        # False positive in Mitigation (drop prima di Analysis)
-        self.p_fp = 0.01
-
-        # Classificatore ML al centro Analysis
-        self.p_tpr = 0.9938  # Pr(LECITO→LECITO) True Positive
-        self.p_tnr = 0.9938  # Pr(ILLECITO→ILLECITO) True Negative
-
-        # Derivate utili per Analysis
-        # Drop per ML = FN (leciti) + TN (illeciti)
-        self.p_drop_ml = self.p_lecito * (1.0 - self.p_tpr) + self.p_illecito * self.p_tnr
-        # Passano (verso Web/Spike) = TP (leciti) + FP (illeciti)
+        # Probabilità di drop per classificazione ML (media sul mix)
+        self.p_drop_ml = 0.89504
         self.p_pass_ml = 1.0 - self.p_drop_ml
 
-        # ====== Spazio degli stati ======
+        # ---- Stato / mapping ----
         self.states = []
         self.state_to_index = {}
         self._build_state_space()
 
-    # ------------------------------------------------------------------ #
-    # Costruzione spazio degli stati
-    # ------------------------------------------------------------------ #
+    # -------------------- Stato --------------------
     def _build_state_space(self):
         idx = 0
         for i in range(self.K_mitigation + 1):
@@ -79,98 +60,118 @@ class DDoSMarkovChain:
         print(f"Spazio degli stati costruito: {len(self.states)} stati (dim: "
               f"{self.K_mitigation+1}×{self.K_analysis+1}×{self.K_web+1}×{self.K_spike+1})")
 
-    # ------------------------------------------------------------------ #
-    # Tasso di transizione tra stati
-    # ------------------------------------------------------------------ #
-    def _get_transition_rate(self, from_state, to_state):
-        i1, a1, w1, s1 = from_state
-        i2, a2, w2, s2 = to_state
+    # -------------------- Tassi di transizione --------------------
+    def _rate_mit_depart(self, i):
+        """Mitigation: PS M/M/1 → tasso totale = mu_mitigation se i>0, altrimenti 0."""
+        return self.mu_mitigation if i > 0 else 0.0
 
-        rate = 0.0
+    def _rate_ana_depart(self, a):
+        """Analysis: M/M/c/c → tasso totale = mu_ana_core * min(a, c)."""
+        return self.mu_ana_core * min(a, self.c_ana)
 
-        # ----------------- (1) ARRIVI al Mitigation -----------------
-        # (i, a, w, s) -> (i+1, a, w, s) se non pieno
-        if i2 == i1 + 1 and a2 == a1 and w2 == w1 and s2 == s1:
-            if i1 < self.K_mitigation:
-                rate += self.lambda_arrival
+    def _rate_web_depart(self, w):
+        """Web: PS → tasso totale = mu_web se w>0, altrimenti 0."""
+        return self.mu_web if w > 0 else 0.0
 
-        # ----------------- (2) COMPLETAMENTI al Mitigation -----------------
-        # (i, a, w, s) -> (i-1, a, w, s) [drop FP]
-        if i1 > 0 and i2 == i1 - 1 and a2 == a1 and w2 == w1 and s2 == s1:
-            rate += self.mu_mitigation * self.p_fp
+    def _rate_spi_depart(self, s):
+        """Spike: PS → tasso totale = mu_spike se s>0, altrimenti 0."""
+        return self.mu_spike if s > 0 else 0.0
 
-        # (i, a, w, s) -> (i-1, a+1, w, s) [inoltro verso Analysis se non pieno]
-        if i1 > 0 and i2 == i1 - 1 and a2 == a1 + 1 and w2 == w1 and s2 == s1:
-            if a1 < self.K_analysis:
-                rate += self.mu_mitigation * (1.0 - self.p_fp)
+    def _get_transition_rate(self, st_from, st_to):
+        i, a, w, s = st_from
+        i2, a2, w2, s2 = st_to
 
-        # (i, a, w, s) -> (i-1, a, w, s) [inoltro fallito per Analysis pieno → drop]
-        if i1 > 0 and i2 == i1 - 1 and a2 == a1 and w2 == w1 and s2 == s1:
-            if a1 >= self.K_analysis:
-                rate += self.mu_mitigation * (1.0 - self.p_fp)
+        # 1) ARRIVI al Mitigation (se non pieno)
+        if (i2 == i + 1) and (a2 == a) and (w2 == w) and (s2 == s):
+            if i < self.K_mitigation:
+                return self.lambda_arrival
+            return 0.0
 
-        # ----------------- (3) COMPLETAMENTI all'Analysis -----------------
-        # tasso = min(a, c) * mu_core
-        if a1 > 0:
-            ana_rate = min(a1, self.c_analysis) * self.mu_analysis_core
+        # 2) COMPLETAMENTI al Mitigation → FP / Analysis (se cap) / drop per Analysis piena
+        if (i2 == i - 1) and (a2 in (a, a + 1)) and (w2 == w) and (s2 == s) and (i > 0):
+            dep = self._rate_mit_depart(i)
+            if dep == 0.0:
+                return 0.0
 
-            # (i, a, w, s) -> (i, a-1, w, s) [drop per ML]
-            if i2 == i1 and a2 == a1 - 1 and w2 == w1 and s2 == s1:
-                rate += ana_rate * self.p_drop_ml
+            # a) Drop per falso positivo (rimane a, w, s invariati)
+            if a2 == a:
+                # due casi si “accavallano”: FP o cap Analysis piena.
+                # Distinguiamoli con le condizioni.
+                # - FP: sempre possibile
+                # - Analisi piena: SOLO se a == K_analysis e non FP
+                # Prima, FP:
+                # Nota: questa transizione compete con la “drop per cap Analysis piena”,
+                #       che modelliamo sotto con stessa (i2==i-1, a2==a).
+                # Qui ritorniamo SOLO la parte FP.
+                return dep * self.p_fp
 
-            # (i, a, w, s) -> (i, a-1, w+1, s) [passa a Web se non pieno]
-            if i2 == i1 and a2 == a1 - 1 and w2 == w1 + 1 and s2 == s1 and w1 < self.K_web:
-                rate += ana_rate * self.p_pass_ml
+            # b) Forward a Analysis (se non piena): i→i-1, a→a+1
+            if (a2 == a + 1) and (a < self.K_analysis):
+                return dep * (1.0 - self.p_fp)
 
-            # (i, a, w, s) -> (i, a-1, w, s+1) [altrimenti a Spike se Web pieno e Spike non pieno]
-            if i2 == i1 and a2 == a1 - 1 and w2 == w1 and s2 == s1 + 1:
-                if w1 >= self.K_web and s1 < self.K_spike:
-                    rate += ana_rate * self.p_pass_ml
+            # c) Drop per Analysis piena (non FP): i→i-1 (a invariato) se a==K_analysis
+            if (a2 == a) and (a == self.K_analysis):
+                return dep * (1.0 - self.p_fp)
 
-            # (i, a, w, s) -> (i, a-1, w, s) [drop per full downstream]
-            if i2 == i1 and a2 == a1 - 1 and w2 == w1 and s2 == s1:
-                if w1 >= self.K_web and s1 >= self.K_spike:
-                    rate += ana_rate * self.p_pass_ml
+            return 0.0
 
-        # ----------------- (4) COMPLETAMENTI Web (PS) -----------------
-        # transizione: (i, a, w, s) -> (i, a, w-1, s)
-        if w1 > 0 and i2 == i1 and a2 == a1 and w2 == w1 - 1 and s2 == s1:
-            # In PS somma dei tassi = mu_web quando w1>0
-            rate += self.mu_web
+        # 3) COMPLETAMENTI in Analysis → ML drop / Web / Spike / drop per downstream full
+        if (i2 == i) and (a2 in (a - 1, a)) and (w2 in (w, w + 1)) and (s2 in (s, s + 1)) and (a > 0):
+            dep = self._rate_ana_depart(a)
+            if dep == 0.0:
+                return 0.0
 
-        # ----------------- (5) COMPLETAMENTI Spike (PS) -----------------
-        # transizione: (i, a, w, s) -> (i, a, w, s-1)
-        if s1 > 0 and i2 == i1 and a2 == a1 and w2 == w1 and s2 == s1 - 1:
-            rate += self.mu_spike
+            # Esiti alla partenza da Analysis:
+            # - Drop per ML: a→a-1 (w,s invariati)
+            if (a2 == a - 1) and (w2 == w) and (s2 == s):
+                return dep * self.p_drop_ml
 
-        return rate
+            # - Forward (p_pass_ml) verso Web/Spike se non pieni, altrimenti drop per full
+            fwd = dep * self.p_pass_ml
 
-    # ------------------------------------------------------------------ #
-    # Matrice generatrice
-    # ------------------------------------------------------------------ #
+            # → Web se w<K_web
+            if (a2 == a - 1) and (w2 == w + 1) and (s2 == s) and (w < self.K_web):
+                return fwd
+
+            # → Spike se Web pieno e s<K_spike
+            if (a2 == a - 1) and (w2 == w) and (s2 == s + 1) and (w >= self.K_web) and (s < self.K_spike):
+                return fwd
+
+            # → Drop per downstream full (Web e Spike pieni): a→a-1, w,s invariati
+            if (a2 == a - 1) and (w2 == w) and (s2 == s) and (w >= self.K_web) and (s >= self.K_spike):
+                return fwd
+
+            return 0.0
+
+        # 4) COMPLETAMENTI Web (PS): w→w-1
+        if (i2 == i) and (a2 == a) and (w2 == w - 1) and (s2 == s) and (w > 0):
+            return self._rate_web_depart(w)
+
+        # 5) COMPLETAMENTI Spike (PS): s→s-1
+        if (i2 == i) and (a2 == a) and (w2 == w) and (s2 == s - 1) and (s > 0):
+            return self._rate_spi_depart(s)
+
+        return 0.0
+
+    # -------------------- Generatrice & Steady State --------------------
     def build_generator_matrix(self):
         n = len(self.states)
         print(f"Costruzione matrice generatrice Q ({n}×{n})...")
         Q = sp.lil_matrix((n, n))
-
-        for i, from_state in enumerate(self.states):
+        for i, st_from in enumerate(self.states):
             if i % 1000 == 0:
                 print(f"  Stato {i}/{n}")
             row_sum = 0.0
-            for j, to_state in enumerate(self.states):
+            for j, st_to in enumerate(self.states):
                 if i == j:
                     continue
-                r = self._get_transition_rate(from_state, to_state)
-                if r > 0.0:
+                r = self._get_transition_rate(st_from, st_to)
+                if r > 0:
                     Q[i, j] = r
                     row_sum += r
             Q[i, i] = -row_sum
-
         return Q.tocsr()
 
-    # ------------------------------------------------------------------ #
-    # Stazionarie
-    # ------------------------------------------------------------------ #
     def solve_steady_state(self, Q):
         print("Risoluzione sistema lineare per probabilità stazionarie...")
         n = Q.shape[0]
@@ -180,218 +181,229 @@ class DDoSMarkovChain:
         b[-1] = 1.0
         pi = spsolve(A.tocsr(), b)
         pi = np.maximum(pi, 0)
-        pi = pi / np.sum(pi)
+        pi /= np.sum(pi)
         return pi
 
-    # ------------------------------------------------------------------ #
-    # Metriche
-    # ------------------------------------------------------------------ #
     def calculate_metrics(self, pi):
         print("Calcolo metriche di performance...")
 
-        U = {'mitigation': 0.0, 'analysis': 0.0, 'web': 0.0, 'spike': 0.0}
-        N = {'mitigation': 0.0, 'analysis': 0.0, 'web': 0.0, 'spike': 0.0}
-        TH = {'mitigation': 0.0, 'analysis': 0.0, 'web': 0.0, 'spike': 0.0}
+        # ---- accumulatori ----
+        util_mit = util_web = util_spi = 0.0
+        avg_i = avg_a = avg_w = avg_s = 0.0
 
-        # Probabilità di centro pieno
-        P_full = {'mitigation': 0.0, 'analysis': 0.0}
+        thr_mit = thr_ana = thr_web = thr_spi = 0.0
 
-        # Routing/Drop ai completamenti
-        mit_depart = 0.0
-        mit_to_analysis = 0.0
-        mit_drop_fp = 0.0
-        mit_drop_anafull = 0.0
+        p_mit_full = 0.0
+        p_ana_full = 0.0
+        p_ana_nonempty = 0.0          # P{A>0}
+        e_busy_ana = 0.0              # E[min(A,c)] = #core medi occupati
 
-        ana_depart = 0.0
-        ana_to_web = 0.0
-        ana_to_spike = 0.0
-        ana_drop_ml = 0.0
-        ana_drop_full = 0.0
+        # routing
+        rate_mit_to_ana   = 0.0
+        rate_mit_drop_fp  = 0.0
+        rate_mit_drop_cap = 0.0
+
+        rate_ana_drop_ml   = 0.0
+        rate_ana_to_web    = 0.0
+        rate_ana_to_spike  = 0.0
+        rate_ana_drop_full = 0.0
 
         for idx, (i, a, w, s) in enumerate(self.states):
             p = pi[idx]
 
-            # pieni?
-            if i == self.K_mitigation:
-                P_full['mitigation'] += p
-            if a == self.K_analysis:
-                P_full['analysis'] += p
+            if i == self.K_mitigation: p_mit_full += p
+            if a == self.K_analysis:   p_ana_full += p
+            if a > 0:                  p_ana_nonempty += p
 
-            # "utilization"
+            # --- Utilizzazioni stile-PS ---
+            if i > 0: util_mit += p
+            if w > 0: util_web += p
+            if s > 0: util_spi += p
+
+            # --- E[min(A,c)] per il centro Analysis (multi-core) ---
+            e_busy_ana += p * min(a, self.c_ana)
+
+            # --- N medi ---
+            avg_i += p * i
+            avg_a += p * a
+            avg_w += p * w
+            avg_s += p * s
+
+            # --- Throughput istantanei ---
+            if i > 0: thr_mit += p * self.mu_mitigation
+            if w > 0: thr_web += p * self.mu_web
+            if s > 0: thr_spi += p * self.mu_spike
+            thr_ana += p * (self.mu_ana_core * min(a, self.c_ana))
+
+            # --- Routing / drop al Mitigation ---
             if i > 0:
-                U['mitigation'] += p
-            # analysis: frazione di core occupati media = E[min(a,c)]/c
-            U['analysis'] += (min(a, self.c_analysis) / self.c_analysis) * p
-            if w > 0:
-                U['web'] += p
-            if s > 0:
-                U['spike'] += p
-
-            # N medi
-            N['mitigation'] += i * p
-            N['analysis'] += a * p
-            N['web'] += w * p
-            N['spike'] += s * p
-
-            # Throughput
-            if i > 0:
-                TH['mitigation'] += self.mu_mitigation * p
-                # routing a valle di Mitigation
-                mit_depart += self.mu_mitigation * p
-                mit_drop_fp += self.mu_mitigation * p * self.p_fp
+                dep = p * self.mu_mitigation
+                # FP
+                rate_mit_drop_fp  += dep * self.p_fp
+                # non-FP → Analysis se non pieno, altrimenti drop per cap
                 if a < self.K_analysis:
-                    mit_to_analysis += self.mu_mitigation * p * (1.0 - self.p_fp)
+                    rate_mit_to_ana += dep * (1.0 - self.p_fp)
                 else:
-                    mit_drop_anafull += self.mu_mitigation * p * (1.0 - self.p_fp)
+                    rate_mit_drop_cap += dep * (1.0 - self.p_fp)
 
+            # --- Routing / drop all'Analysis ---
             if a > 0:
-                ana_rate = min(a, self.c_analysis) * self.mu_analysis_core
-                TH['analysis'] += ana_rate
-                # routing da Analysis
-                ana_depart += ana_rate
-                ana_drop_ml += ana_rate * self.p_drop_ml
-                # forward (se possibile)
-                if self.p_pass_ml > 0:
-                    if w < self.K_web:
-                        ana_to_web += ana_rate * self.p_pass_ml
-                    elif s < self.K_spike:
-                        ana_to_spike += ana_rate * self.p_pass_ml
-                    else:
-                        ana_drop_full += ana_rate * self.p_pass_ml
+                dep_ana = p * (self.mu_ana_core * min(a, self.c_ana))
+                rate_ana_drop_ml += dep_ana * self.p_drop_ml
+                fwd = dep_ana * self.p_pass_ml
+                if w < self.K_web:
+                    rate_ana_to_web += fwd
+                elif s < self.K_spike:
+                    rate_ana_to_spike += fwd
+                else:
+                    rate_ana_drop_full += fwd
 
-            if w > 0:
-                TH['web'] += self.mu_web * p
-            if s > 0:
-                TH['spike'] += self.mu_spike * p
+        # ---- grandezze derivate ----
+        util_ana_per_core = e_busy_ana / (self.c_ana)        # E[min(A,c)]/c
+        # per confronto: thr_ana_expected = mu_core * E[min(A,c)]
+        thr_ana_expected = self.mu_ana_core * e_busy_ana
 
-        # Response time (Little)
-        eps = 1e-15
-        RT = {
-            'mitigation': (N['mitigation'] / max(TH['mitigation'], eps)) if TH['mitigation'] > 0 else 0.0,
-            'analysis':   (N['analysis']   / max(TH['analysis'],   eps)) if TH['analysis']   > 0 else 0.0,
-            'web':        (N['web']        / max(TH['web'],        eps)) if TH['web']        > 0 else 0.0,
-            'spike':      (N['spike']      / max(TH['spike'],      eps)) if TH['spike']      > 0 else 0.0,
-        }
+        # tempi di risposta (Little): T = N / throughput
+        rt_mit = (avg_i / thr_mit) if thr_mit > 0 else 0.0
+        rt_ana = (avg_a / thr_ana) if thr_ana > 0 else 0.0
+        rt_web = (avg_w / thr_web) if thr_web > 0 else 0.0
+        rt_spi = (avg_s / thr_spi) if thr_spi > 0 else 0.0
 
-        # Routing prob condizionate
-        mit_route = {
-            'to_analysis': (mit_to_analysis / mit_depart) if mit_depart > 0 else 0.0,
-            'drop_fp':     (mit_drop_fp     / mit_depart) if mit_depart > 0 else 0.0,
-            'drop_anafull':(mit_drop_anafull/ mit_depart) if mit_depart > 0 else 0.0,
-        }
-        ana_route = {
-            'to_web':   (ana_to_web   / ana_depart) if ana_depart > 0 else 0.0,
-            'to_spike': (ana_to_spike / ana_depart) if ana_depart > 0 else 0.0,
-            'drop_ml':  (ana_drop_ml  / ana_depart) if ana_depart > 0 else 0.0,
-            'drop_full':(ana_drop_full/ ana_depart) if ana_depart > 0 else 0.0,
-        }
+        lambda_eff = self.lambda_arrival * (1.0 - p_mit_full)
+
+        # Prob condizionate ai completamenti
+        mit_dep = thr_mit
+        ana_dep = thr_ana
+
+        p_mit_to_ana   = rate_mit_to_ana   / mit_dep if mit_dep > 0 else 0.0
+        p_mit_drop_fp  = rate_mit_drop_fp  / mit_dep if mit_dep > 0 else 0.0
+        p_mit_drop_cap = rate_mit_drop_cap / mit_dep if mit_dep > 0 else 0.0
+
+        p_ana_to_web    = rate_ana_to_web    / ana_dep if ana_dep > 0 else 0.0
+        p_ana_to_spike  = rate_ana_to_spike  / ana_dep if ana_dep > 0 else 0.0
+        p_ana_drop_ml   = rate_ana_drop_ml   / ana_dep if ana_dep > 0 else 0.0
+        p_ana_drop_full = rate_ana_drop_full / ana_dep if ana_dep > 0 else 0.0
 
         return {
-            'utilizations': U,
-            'avg_jobs': N,
-            'throughput': TH,
-            'response_times': RT,
-            'prob_full': P_full,
-            'routing_mit': mit_route,
-            'routing_ana': ana_route,
-            'rates': {
-                'lambda_eff': self.lambda_arrival * (1.0 - P_full['mitigation']),
-                'drop_mit_fp': mit_drop_fp,
-                'drop_ana_cap': ana_drop_full,
-                'drop_ml': ana_drop_ml,
-                'drop_downstream': 0.0  # non servono altri drop qui
+            "utilizations": {
+                "mitigation": util_mit,                   # = P{I>0}
+                "analysis_per_core": util_ana_per_core,   # = E[min(A,c)]/c
+                "analysis_nonempty": p_ana_nonempty,      # = P{A>0}
+                "web": util_web,                          # = P{W>0}
+                "spike": util_spi,                        # = P{S>0}
+                "analysis_avg_busy_cores": e_busy_ana     # = E[min(A,c)]
+            },
+            "avg_jobs": {
+                "mitigation": avg_i,
+                "analysis":   avg_a,
+                "web":        avg_w,
+                "spike":      avg_s,
+            },
+            "throughput": {
+                "mitigation": thr_mit,
+                "analysis":   thr_ana,
+                "web":        thr_web,
+                "spike":      thr_spi,
+                "analysis_expected": thr_ana_expected     # check: ≈ analysis
+            },
+            "response_times": {
+                "mitigation": rt_mit,
+                "analysis":   rt_ana,
+                "web":        rt_web,
+                "spike":      rt_spi,
+            },
+            "routing_probabilities": {
+                "mitigation": {
+                    "to_analysis": p_mit_to_ana,
+                    "drop_fp":     p_mit_drop_fp,
+                    "drop_ana_full": p_mit_drop_cap,
+                },
+                "analysis": {
+                    "to_web":     p_ana_to_web,
+                    "to_spike":   p_ana_to_spike,
+                    "drop_ml":    p_ana_drop_ml,
+                    "drop_full":  p_ana_drop_full,
+                }
+            },
+            "rates": {
+                "effective_arrival": lambda_eff,
+                "drop_mit_fp":       rate_mit_drop_fp,
+                "drop_ana_cap":      rate_mit_drop_cap,
+                "drop_ml_class":     rate_ana_drop_ml,
+                "drop_downstream":   rate_ana_drop_full,
+            },
+            "probabilities": {
+                "mitigation_full": p_mit_full,
+                "analysis_full":   p_ana_full,
             }
         }
 
-    # ------------------------------------------------------------------ #
-    # Stampa risultati (con DIAGNOSTICA PS)
-    # ------------------------------------------------------------------ #
-    def print_results(self, metrics):
-        U = metrics['utilizations']
-        TH = metrics['throughput']
-        RT = metrics['response_times']
-        Pfull = metrics['prob_full']
-        rM = metrics['routing_mit']
-        rA = metrics['routing_ana']
-
-        print("\n" + "=" * 70)
+    def print_report(self, m):
+        print("\n" + "="*70)
         print("MODELLO ANALITICO – Variante MIGLIORATIVA (con Analysis Center ML)")
-        print("=" * 70)
+        print("="*70)
 
-        # UTILIZZAZIONI
         print("\nUTILIZZAZIONI:")
-        print(f"  Mitigation   : {U['mitigation']:.6f}")
-        print(f"  Analysis     : {U['analysis']:.6f}  (≈ E[min(a,c)]/c)")
-        print(f"  Web          : {U['web']:.6f}")
-        print(f"  Spike        : {U['spike']:.6f}")
+        print(f"  Mitigation            : {m['utilizations']['mitigation']:.6f}  (P[I>0])")
+        print(f"  Analysis (per-core)   : {m['utilizations']['analysis_per_core']:.6f}  (=E[min(A,c)]/c)")
+        print(f"  Analysis P(A>0)       : {m['utilizations']['analysis_nonempty']:.6f}")
+        print(f"  Analysis avg busy c.  : {m['utilizations']['analysis_avg_busy_cores']:.6f}  (=E[min(A,c)])")
+        print(f"  Web                   : {m['utilizations']['web']:.6f}  (P[W>0])")
+        print(f"  Spike                 : {m['utilizations']['spike']:.6f}  (P[S>0])")
 
-        # THROUGHPUT
         print("\nTHROUGHPUT (job/s):")
-        print(f"  Mitigation   : {TH['mitigation']:.6f}")
-        print(f"  Analysis     : {TH['analysis']:.6f}")
-        print(f"  Web          : {TH['web']:.6f}")
-        # usa e-notation per grandezze piccole
-        print(f"  Spike        : {TH['spike']:.3e}")
+        print(f"  Mitigation   : {m['throughput']['mitigation']:.6f}")
+        print(f"  Analysis     : {m['throughput']['analysis']:.6f}")
+        print(f"  Web          : {m['throughput']['web']:.6f}")
+        print(f"  Spike        : {m['throughput']['spike']:.6f}")
 
-        # TEMPI DI RISPOSTA
         print("\nTEMPI DI RISPOSTA (s):")
-        print(f"  Mitigation   : {RT['mitigation']:.6f}")
-        print(f"  Analysis     : {RT['analysis']:.6f}")
-        print(f"  Web          : {RT['web']:.6f}")
-        if TH['spike'] < 1e-12:
-            print(f"  Spike        : —  (throughput ~ 0)")
-        else:
-            print(f"  Spike        : {RT['spike']:.6f}")
+        print(f"  Mitigation   : {m['response_times']['mitigation']:.6f}")
+        print(f"  Analysis     : {m['response_times']['analysis']:.6f}")
+        print(f"  Web          : {m['response_times']['web']:.6f}")
+        print(f"  Spike        : {m['response_times']['spike']:.6f}")
 
-        # ROUTING
         print("\nPROBABILITÀ DI ROUTING (condizionate al completamento del centro):")
+        r_m = m["routing_probabilities"]["mitigation"]
+        r_a = m["routing_probabilities"]["analysis"]
         print("  Mitigation → ...")
-        print(f"    to Analysis    : {rM['to_analysis']:.6f} ({rM['to_analysis']*100:.2f}%)")
-        print(f"    drop (FP)      : {rM['drop_fp']:.6f} ({rM['drop_fp']*100:.2f}%)")
-        print(f"    drop (AnaFull) : {rM['drop_anafull']:.6f} ({rM['drop_anafull']*100:.2f}%)")
+        print(f"    to Analysis    : {r_m['to_analysis']:.6f} ({100*r_m['to_analysis']:.2f}%)")
+        print(f"    drop (FP)      : {r_m['drop_fp']:.6f} ({100*r_m['drop_fp']:.2f}%)")
+        print(f"    drop (AnaFull) : {r_m['drop_ana_full']:.6f} ({100*r_m['drop_ana_full']:.2f}%)")
         print("  Analysis → ...")
-        print(f"    to Web         : {rA['to_web']:.6f} ({rA['to_web']*100:.2f}%)")
-        print(f"    to Spike       : {rA['to_spike']:.6f} ({rA['to_spike']*100:.2f}%)")
-        print(f"    drop (ML)      : {rA['drop_ml']:.6f} ({rA['drop_ml']*100:.2f}%)")
-        print(f"    drop (Full)    : {rA['drop_full']:.6f} ({rA['drop_full']*100:.2f}%)")
+        print(f"    to Web         : {r_a['to_web']:.6f} ({100*r_a['to_web']:.2f}%)")
+        print(f"    to Spike       : {r_a['to_spike']:.6f} ({100*r_a['to_spike']:.2f}%)")
+        print(f"    drop (ML)      : {r_a['drop_ml']:.6f} ({100*r_a['drop_ml']:.2f}%)")
+        print(f"    drop (Full)    : {r_a['drop_full']:.6f} ({100*r_a['drop_full']:.2f}%)")
 
-        # ALTRE METRICHE
         print("\nALTRE METRICHE:")
-        print(f"  P(Mitigation pieno) : {Pfull['mitigation']:.6f}")
-        print(f"  P(Analysis pieno)   : {Pfull['analysis']:.6f}")
-        print(f"  λ_eff (ingresso)    : {metrics['rates']['lambda_eff']:.6f} job/s")
-        print(f"  Drop @Mit(FP)       : {metrics['rates']['drop_mit_fp']:.6f} job/s")
-        print(f"  Drop @Ana(cap)      : {metrics['rates']['drop_ana_cap']:.6f} job/s")
-        print(f"  Drop @ML(class)     : {metrics['rates']['drop_ml']:.6f} job/s")
-        print(f"  Drop @downstream    : {metrics['rates']['drop_downstream']:.6f} job/s")
+        print(f"  P(Mitigation pieno) : {m['probabilities']['mitigation_full']:.6f}")
+        print(f"  P(Analysis pieno)   : {m['probabilities']['analysis_full']:.6f}")
+        print(f"  λ_eff (ingresso)    : {m['rates']['effective_arrival']:.6f} job/s")
+        print(f"  Drop @Mit(FP)       : {m['rates']['drop_mit_fp']:.6f} job/s")
+        print(f"  Drop @Ana(cap)      : {m['rates']['drop_ana_cap']:.6f} job/s")
+        print(f"  Drop @ML(class)     : {m['rates']['drop_ml_class']:.6f} job/s")
+        print(f"  Drop @downstream    : {m['rates']['drop_downstream']:.6f} job/s")
 
-        # ------------ DIAGNOSTICA PS (condizionata al centro non vuoto) ------------
-        eps = 1e-15
-        P_web_busy = U['web']             # ≈ P{W>0}
-        P_spk_busy = U['spike']           # ≈ P{S>0}
-        # E[· | ·>0] = E[·] / P{·>0}
-        E_W_cond = (metrics['avg_jobs']['web']   / max(P_web_busy, eps)) if P_web_busy > 0 else 0.0
-        E_S_cond = (metrics['avg_jobs']['spike'] / max(P_spk_busy, eps)) if P_spk_busy > 0 else 0.0
-
-        print("\nDIAGNOSTICA PS (condizionata a centro non vuoto):")
-        print(f"  P(Web>0)   = {P_web_busy:.3e}")
-        print(f"  E[W|W>0]   = {E_W_cond:.3f}  → job concorrenti quando Web è attivo")
-        print(f"  Check RT_w ≈ E[W|W>0]/μ = {E_W_cond/self.mu_web if P_web_busy>0 else 0.0:.3f} s")
-        print(f"  P(Spike>0) = {P_spk_busy:.3e}")
-        print(f"  E[S|S>0]   = {E_S_cond:.3f}  → job concorrenti quando Spike è attivo")
-        print(f"  Check RT_s ≈ E[S|S>0]/μ = {E_S_cond/self.mu_spike if P_spk_busy>0 else 0.0:.3f} s")
-
+        # --- Consistency checks utili ---
+        thr_ana = m['throughput']['analysis']
+        util_core = m['utilizations']['analysis_per_core']
+        thr_ana_chk = self.mu_ana_core * self.c_ana * util_core
+        print("\nCHECK:")
+        print(f"  Analysis thr  vs μ·c·util_core : {thr_ana:.6f}  vs  {thr_ana_chk:.6f}")
+        if thr_ana > 0:
+            avg_a = m['avg_jobs']['analysis']
+            rt_ana = m['response_times']['analysis']
+            print(f"  Little (Analysis): N≈λT → {avg_a:.6f} ≈ {thr_ana:.6f}·{rt_ana:.6f} = {thr_ana*rt_ana:.6f}")
 
 def main():
     print("Avvio risoluzione catena di Markov – modello MIGLIORATIVO (con Analysis Center ML)...")
     t0 = time.time()
-
     mc = DDoSMarkovChain()
     Q = mc.build_generator_matrix()
     pi = mc.solve_steady_state(Q)
     metrics = mc.calculate_metrics(pi)
-    mc.print_results(metrics)
-
+    mc.print_report(metrics)
     print(f"\nTempo di esecuzione: {time.time() - t0:.2f} s")
 
 

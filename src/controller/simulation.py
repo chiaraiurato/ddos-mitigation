@@ -10,9 +10,14 @@ from model.job import Job
 from model.processor_sharing_server import ProcessorSharingServer
 from model.mitigation_manager import MitigationManager
 from utils.checkpoint import _rt_mean_upto, _utilization_upto, _throughput_upto
-from engineering.statistics import batch_means, export_bm_series_to_wide_csv, print_autocorrelation, util_thr_per_batch, window_util_thr
+from engineering.statistics import (
+    batch_means, export_bm_series_to_wide_csv, print_autocorrelation,
+    util_thr_per_batch, window_util_thr
+)
 
-
+# ---------------------------------------------------------------------
+# fallback per costanti scenario transitorio / finito (se rinominate altrove)
+# ---------------------------------------------------------------------
 try:
     STOP_TRANSITORY = STOP_CONDITION_TRANSITORY
 except NameError:
@@ -28,6 +33,48 @@ except NameError:
         CHECKPOINT_TRANSITORY = CHECKPOINT_TIME_TRANSITORY
     except NameError:
         CHECKPOINT_TRANSITORY = CHECKPOINT_TIME_FINITE_SIMULATION
+
+
+# ---------------------------------------------------------------------
+# CSV di VALIDAZIONE (x1/x2/x5/x10/x40) – fieldnames
+#  - include sempre le colonne Analysis*; per baseline verranno riempite con None
+#  - Spike: SOLO Spike-0 (point + BM), non più media/aggregati
+# ---------------------------------------------------------------------
+def validation_fieldnames():
+    return [
+        # scenario & input
+        "scenario", "ARRIVAL_P", "ARRIVAL_L1", "ARRIVAL_L2",
+        # tempo & conteggi
+        "total_time", "total_arrivals",
+        # --- Web (point)
+        "web_util", "web_rt_mean", "web_throughput",
+        # --- Spike-0 (point)
+        "spikes_count", "spike0_util", "spike0_rt_mean", "spike0_throughput",
+        # --- Mitigation (point)
+        "mit_util", "mit_rt_mean", "mit_throughput",
+        # --- Drop rates (per secondo)
+        "drop_fp_rate", "drop_full_rate",
+        # --- Web (BM)
+        "web_util_bm_mean", "web_util_bm_ci",
+        "web_thr_bm_mean",  "web_thr_bm_ci",
+        "web_rt_bm_mean",   "web_rt_bm_ci",
+        # --- Spike-0 (BM)
+        "spike0_util_bm_mean", "spike0_util_bm_ci",
+        "spike0_thr_bm_mean",  "spike0_thr_bm_ci",
+        "spike0_rt_bm_mean",   "spike0_rt_bm_ci",
+        # --- Mitigation (BM)
+        "mit_util_bm_mean", "mit_util_bm_ci",
+        "mit_thr_bm_mean",  "mit_thr_bm_ci",
+        "mit_rt_bm_mean",   "mit_rt_bm_ci",
+        # --- Analysis ML (point, sempre presenti: None se baseline)
+        "analysis_util", "analysis_rt_mean", "analysis_throughput",
+        # --- Analysis ML (BM)
+        "ana_util_bm_mean", "ana_util_bm_ci",
+        "ana_thr_bm_mean",  "ana_thr_bm_ci",
+        "ana_rt_bm_mean",   "ana_rt_bm_ci",
+        # --- Parametri BM usati
+        "bm_rt_batch_size", "bm_win_size", "bm_windows_per_batch"
+    ]
 
 
 class DDoSSystem:
@@ -59,6 +106,106 @@ class DDoSSystem:
 
         self.env.process(self.arrival_process(mode))
 
+    # -----------------------------------------------------------------
+    # Helper: busy periods del centro di Analisi (UNION, solo fallback)
+    # -----------------------------------------------------------------
+    def _get_analysis_busy_periods(self, ac, now):
+        periods = getattr(ac, "busy_periods", None)
+        if periods is not None:
+            out = []
+            for (a, b) in periods:
+                if b is None:
+                    b = now
+                if b > a:
+                    out.append((a, b))
+            return out
+
+        core_lists = getattr(ac, "core_busy_periods", [])
+        flat = []
+        for lst in core_lists:
+            for (a, b) in lst:
+                if b is None:
+                    b = now
+                if b > a:
+                    flat.append((a, b))
+        if not flat:
+            return []
+
+        flat.sort(key=lambda x: x[0])
+        merged = [list(flat[0])]
+        for a, b in flat[1:]:
+            if a > merged[-1][1]:
+                merged.append([a, b])
+            else:
+                if b > merged[-1][1]:
+                    merged[-1][1] = b
+        return [(a, b) for a, b in merged]
+
+    # -----------------------------------------------------------------
+    # Helper: utilizzo corretto (single-server)
+    # -----------------------------------------------------------------
+    def _single_util(self, server, now):
+        return getattr(server, "busy_time", 0.0) / max(now, 1e-12)
+
+    # -----------------------------------------------------------------
+    # Helper: utilizzo Analysis rate-based (coerente con Markov)
+    #   U_core = (throughput * avg_RT) / c = (completamenti/now * avg_RT) / c
+    # -----------------------------------------------------------------
+    def _analysis_util_rate_based(self, ac, now):
+        c = getattr(ac, "num_cores", getattr(ac, "cores", 1))
+        if c is None or c <= 0:
+            c = 1
+        comps = int(getattr(ac, "total_completions", 0))
+        thr = comps / max(now, 1e-12)
+        if getattr(ac, "completed_jobs", None) and ac.completed_jobs:
+            avg_rt = float(np.mean(ac.completed_jobs))
+        else:
+            avg_rt = 0.0
+        return (thr * avg_rt) / c
+
+    # -----------------------------------------------------------------
+    # Helper: utilizzo Analysis rate-based fino a 'when'
+    #   usa mean RT fino a 'when' e throughput_upto(when)
+    # -----------------------------------------------------------------
+    def _analysis_util_rate_based_upto(self, ac, when):
+        c = getattr(ac, "num_cores", getattr(ac, "cores", 1))
+        if c is None or c <= 0:
+            c = 1
+        thr_upto = _throughput_upto(ac.completion_times, when)
+        avg_rt_upto = _rt_mean_upto(ac.completed_jobs, ac.completion_times, when) or 0.0
+        return (thr_upto * avg_rt_upto) / c
+
+    # -----------------------------------------------------------------
+    # Helper: windowing Analysis rate-based (per finestra)
+    #   Per ogni finestra [t-w, t]: util = (completamenti_nella_finestra / w) * (avg_RT_in_finestra) / c
+    # -----------------------------------------------------------------
+    def _window_util_thr_analysis_rate_based(self, ac, window, tmax):
+        c = getattr(ac, "num_cores", getattr(ac, "cores", 1))
+        if c is None or c <= 0:
+            c = 1
+
+        times = list(getattr(ac, "completion_times", []))
+        rts = list(getattr(ac, "completed_jobs", []))
+
+        # Assumo allineamento: rts[k] completa in times[k]
+        n = min(len(times), len(rts))
+        pairs = [(times[k], rts[k]) for k in range(n) if times[k] <= tmax]
+
+        util_samples, thr_samples = [], []
+        t = window
+        while t <= tmax + 1e-12:
+            w_start, w_end = t - window, t
+            # completamenti e RT nella finestra
+            in_win = [rt for (tt, rt) in pairs if (w_start < tt <= w_end)]
+            comps = len(in_win)
+            thr = comps / window
+            avg_rt_w = (sum(in_win) / comps) if comps > 0 else 0.0
+            util_w = (thr * avg_rt_w) / c
+            util_samples.append(util_w)
+            thr_samples.append(thr)
+            t += window
+        return util_samples, thr_samples
+
     # ---------------------- SNAPSHOT (orizzonte finito) ----------------------
     def snapshot(self, when, replica_id=None):
         # flush stati al tempo 'when'
@@ -68,7 +215,7 @@ class DDoSSystem:
         center = self.mitigation_manager.center
         center.update(when)
 
-        # (se presente) chiudi periods Analysis
+        # (se presente) chiudi Analysis al tempo 'when'
         if self.mitigation_manager.analysis_center is not None:
             self.mitigation_manager.analysis_center.update(when)
 
@@ -88,11 +235,11 @@ class DDoSSystem:
             "mit_throughput": _throughput_upto(center.completion_times, when),
         }
 
-        # (facoltativo) Analysis nel CSV se necessario
+        # Analysis nel CSV se attivo (rate-based)
         if self.mitigation_manager.analysis_center is not None:
             ac = self.mitigation_manager.analysis_center
             row["analysis_rt_mean"] = _rt_mean_upto(ac.completed_jobs, ac.completion_times, when)
-            row["analysis_util"] = _utilization_upto(ac.busy_periods, when)
+            row["analysis_util"] = self._analysis_util_rate_based_upto(ac, when)
             row["analysis_throughput"] = _throughput_upto(ac.completion_times, when)
 
         # Contatori globali
@@ -110,7 +257,7 @@ class DDoSSystem:
             row[f"spike{i}_util"] = _utilization_upto(s.busy_periods, when)
             row[f"spike{i}_throughput"] = _throughput_upto(s.completion_times, when)
 
-        # Padding colonne spike fino a MAX_SPIKE_NUMBER
+        # Padding colonne spike
         for i in range(len(self.spike_servers), MAX_SPIKE_NUMBER):
             row[f"spike{i}_rt_mean"] = None
             row[f"spike{i}_util"] = None
@@ -158,7 +305,7 @@ class DDoSSystem:
         elif mode in ("transitory", "finite simulation"):
             interarrival_mode = "standard"
             stop_on_arrivals = False
-        elif mode == "infinite simulazion":
+        elif mode == "infinite simulation":
             arrivals = N_ARRIVALS_BATCH_MEANS
             interarrival_mode = "standard"
             stop_on_arrivals = True
@@ -169,7 +316,9 @@ class DDoSSystem:
 
         if not stop_on_arrivals:
             while True:
-                interarrival_time = get_interarrival_time(interarrival_mode, self.arrival_p, self.arrival_l1, self.arrival_l2)
+                interarrival_time = get_interarrival_time(
+                    interarrival_mode, self.arrival_p, self.arrival_l1, self.arrival_l2
+                )
                 yield self.env.timeout(interarrival_time)
                 self.metrics["total_arrivals"] += 1
                 arrival_time = self.env.now
@@ -180,7 +329,9 @@ class DDoSSystem:
                 self.mitigation_manager.handle_job(job)
         else:
             while self.metrics["total_arrivals"] < arrivals:
-                interarrival_time = get_interarrival_time(interarrival_mode, self.arrival_p, self.arrival_l1, self.arrival_l2)
+                interarrival_time = get_interarrival_time(
+                    interarrival_mode, self.arrival_p, self.arrival_l1, self.arrival_l2
+                )
                 yield self.env.timeout(interarrival_time)
                 self.metrics["total_arrivals"] += 1
                 arrival_time = self.env.now
@@ -190,12 +341,204 @@ class DDoSSystem:
                 job = Job(self.metrics["total_arrivals"], arrival_time, None, is_legal)
                 self.mitigation_manager.handle_job(job)
 
+    # -----------------------------------------------------------------
+    # VALIDATION CSV: SOLO Spike-0 (point & BM) + Analysis ML (se presente)
+    # -----------------------------------------------------------------
+    def export_validation_row(self, scenario: str, out_csv_path: str):
+        now = self.env.now
+
+        # flush stati
+        self.web_server.update(now)
+        for s in self.spike_servers:
+            s.update(now)
+        center = self.mitigation_manager.center
+        center.update(now)
+        ac = self.mitigation_manager.analysis_center
+        if ac is not None:
+            ac.update(now)
+
+        # ------ WEB (point)
+        web_util_point = self._single_util(self.web_server, now)
+        web_rt_mean_point = float(np.mean(self.web_server.completed_jobs)) if self.web_server.completed_jobs else 0.0
+        web_thr_point = self.web_server.total_completions / max(now, 1e-12)
+
+        # ------ SPIKE-0 (point)
+        n_spk = len(self.spike_servers)
+        s0 = self.spike_servers[0] if n_spk > 0 else None
+        if s0 is not None:
+            spike0_util_point = self._single_util(s0, now)
+            spike0_rt_mean_point = float(np.mean(s0.completed_jobs)) if s0.completed_jobs else 0.0
+            spike0_thr_point = s0.total_completions / max(now, 1e-12)
+        else:
+            spike0_util_point = 0.0
+            spike0_rt_mean_point = 0.0
+            spike0_thr_point = 0.0
+
+        # ------ MITIGATION (point)
+        mit_util_point = self._single_util(center, now)
+        mit_rt_mean_point = float(np.mean(center.completed_jobs)) if center.completed_jobs else 0.0
+        mit_thr_point = center.total_completions / max(now, 1e-12)
+
+        # ------ ANALYSIS (point) – solo se presente
+        if ac is not None:
+            ana_util_point = self._analysis_util_rate_based(ac, now)
+            ana_rt_mean_point = float(np.mean(ac.completed_jobs)) if ac.completed_jobs else 0.0
+            ana_thr_point = ac.total_completions / max(now, 1e-12)
+        else:
+            ana_util_point = None
+            ana_rt_mean_point = None
+            ana_thr_point = None
+
+        # ------ Drop rates
+        drop_fp_rate = self.metrics.get("false_positives", 0) / max(now, 1e-12)
+        drop_full_rate = (
+            self.metrics.get("discarded_mitigation", 0)
+            + len(self.metrics.get("discarded_detail", []))
+            + self.metrics.get("discarded_analysis_capacity", 0)
+        ) / max(now, 1e-12)
+
+        # ================= Batch Means / Windowing =================
+        # WEB: util/thr per finestra & RT BM
+        web_util_series, web_thr_series = window_util_thr(
+            self.web_server.busy_periods, self.web_server.completion_times, TIME_WINDOW, now
+        )
+        web_rt_bm_mean, web_rt_bm_ci = batch_means(self.web_server.completed_jobs, BATCH_SIZE)
+
+        # SPIKE-0: util/thr per finestra & RT BM
+        if s0 is not None:
+            spike0_util_series, spike0_thr_series = window_util_thr(
+                s0.busy_periods, s0.completion_times, TIME_WINDOW, now
+            )
+            if s0.completed_jobs and len(s0.completed_jobs) >= BATCH_SIZE * 2:
+                spike0_rt_bm_mean, spike0_rt_bm_ci = batch_means(s0.completed_jobs, BATCH_SIZE)
+            else:
+                spike0_rt_bm_mean = float(np.mean(s0.completed_jobs)) if s0.completed_jobs else 0.0
+                spike0_rt_bm_ci = 0.0
+        else:
+            spike0_util_series, spike0_thr_series = [], []
+            spike0_rt_bm_mean, spike0_rt_bm_ci = 0.0, 0.0
+
+        # MITIGATION: util/thr per finestra & RT BM
+        mit_util_series, mit_thr_series = window_util_thr(
+            center.busy_periods, center.completion_times, TIME_WINDOW, now
+        )
+        mit_rt_bm_mean, mit_rt_bm_ci = batch_means(center.completed_jobs, BATCH_SIZE)
+
+        # ANALYSIS: util/thr per finestra (rate-based) & RT BM
+        if ac is not None:
+            ana_util_series, ana_thr_series = self._window_util_thr_analysis_rate_based(ac, TIME_WINDOW, now)
+            if ac.completed_jobs and len(ac.completed_jobs) >= BATCH_SIZE * 2:
+                ana_rt_bm_mean, ana_rt_bm_ci = batch_means(ac.completed_jobs, BATCH_SIZE)
+            else:
+                ana_rt_bm_mean = float(np.mean(ac.completed_jobs)) if ac.completed_jobs else 0.0
+                ana_rt_bm_ci = 0.0
+        else:
+            ana_util_series, ana_thr_series = [], []
+            ana_rt_bm_mean, ana_rt_bm_ci = None, None
+
+        # ============ CI con Batch Means su serie per-finestra ============
+        def bm_mean_ci(series, win_per_batch):
+            if series and len(series) // win_per_batch >= 2:
+                m, hw = batch_means(series, win_per_batch)
+                return float(m), float(hw)
+            return (float(np.mean(series)) if series else 0.0, 0.0)
+
+        web_util_bm_mean, web_util_bm_ci = bm_mean_ci(web_util_series, TIME_WINDOWS_PER_BATCH)
+        web_thr_bm_mean,  web_thr_bm_ci  = bm_mean_ci(web_thr_series,  TIME_WINDOWS_PER_BATCH)
+
+        spike0_util_bm_mean, spike0_util_bm_ci = bm_mean_ci(spike0_util_series, TIME_WINDOWS_PER_BATCH)
+        spike0_thr_bm_mean,  spike0_thr_bm_ci  = bm_mean_ci(spike0_thr_series,  TIME_WINDOWS_PER_BATCH)
+
+        mit_util_bm_mean, mit_util_bm_ci = bm_mean_ci(mit_util_series, TIME_WINDOWS_PER_BATCH)
+        mit_thr_bm_mean,  mit_thr_bm_ci  = bm_mean_ci(mit_thr_series,  TIME_WINDOWS_PER_BATCH)
+
+        if ac is not None:
+            ana_util_bm_mean, ana_util_bm_ci = bm_mean_ci(ana_util_series, TIME_WINDOWS_PER_BATCH)
+            ana_thr_bm_mean,  ana_thr_bm_ci  = bm_mean_ci(ana_thr_series,  TIME_WINDOWS_PER_BATCH)
+        else:
+            ana_util_bm_mean = ana_util_bm_ci = None
+            ana_thr_bm_mean  = ana_thr_bm_ci  = None
+
+        # --------------- compila riga CSV ---------------
+        row = {
+            "scenario": scenario,
+            "ARRIVAL_P": self.arrival_p,
+            "ARRIVAL_L1": self.arrival_l1,
+            "ARRIVAL_L2": self.arrival_l2,
+
+            "total_time": now,
+            "total_arrivals": self.metrics.get("total_arrivals", 0),
+
+            "web_util": web_util_point,
+            "web_rt_mean": web_rt_mean_point,
+            "web_throughput": web_thr_point,
+
+            "spikes_count": n_spk,
+            "spike0_util": spike0_util_point,
+            "spike0_rt_mean": spike0_rt_mean_point,
+            "spike0_throughput": spike0_thr_point,
+
+            "mit_util": mit_util_point,
+            "mit_rt_mean": mit_rt_mean_point,
+            "mit_throughput": mit_thr_point,
+
+            "drop_fp_rate": drop_fp_rate,
+            "drop_full_rate": drop_full_rate,
+
+            "web_util_bm_mean": web_util_bm_mean,
+            "web_util_bm_ci": web_util_bm_ci,
+            "web_thr_bm_mean": web_thr_bm_mean,
+            "web_thr_bm_ci": web_thr_bm_ci,
+            "web_rt_bm_mean": web_rt_bm_mean,
+            "web_rt_bm_ci": web_rt_bm_ci,
+
+            "spike0_util_bm_mean": spike0_util_bm_mean,
+            "spike0_util_bm_ci": spike0_util_bm_ci,
+            "spike0_thr_bm_mean": spike0_thr_bm_mean,
+            "spike0_thr_bm_ci": spike0_thr_bm_ci,
+            "spike0_rt_bm_mean": spike0_rt_bm_mean,
+            "spike0_rt_bm_ci": spike0_rt_bm_ci,
+
+            "mit_util_bm_mean": mit_util_bm_mean,
+            "mit_util_bm_ci": mit_util_bm_ci,
+            "mit_thr_bm_mean": mit_thr_bm_mean,
+            "mit_thr_bm_ci": mit_thr_bm_ci,
+            "mit_rt_bm_mean": mit_rt_bm_mean,
+            "mit_rt_bm_ci": mit_rt_bm_ci,
+
+            "analysis_util": ana_util_point,
+            "analysis_rt_mean": ana_rt_mean_point,
+            "analysis_throughput": ana_thr_point,
+
+            "ana_util_bm_mean": ana_util_bm_mean,
+            "ana_util_bm_ci": ana_util_bm_ci,
+            "ana_thr_bm_mean": ana_thr_bm_mean,
+            "ana_thr_bm_ci": ana_thr_bm_ci,
+            "ana_rt_bm_mean": ana_rt_bm_mean,
+            "ana_rt_bm_ci": ana_rt_bm_ci,
+
+            "bm_rt_batch_size": BATCH_SIZE,
+            "bm_win_size": TIME_WINDOW,
+            "bm_windows_per_batch": TIME_WINDOWS_PER_BATCH
+        }
+
+        # scrittura CSV (header se nuovo)
+        fns = validation_fieldnames()
+        append_row_stable(out_csv_path, row, fns)
+
+    # ---------------------- REPORT (windowing) ----------------------
     def report_windowing(self):
         now = self.env.now
         self.web_server.update(now)
-        for s in self.spike_servers: s.update(now)
+        for s in self.spike_servers:
+            s.update(now)
         center = self.mitigation_manager.center
         center.update(now)
+
+        # Analysis se presente
+        ac = self.mitigation_manager.analysis_center
+        if ac is not None:
+            ac.update(now)
 
         def close_open_busy_periods(periods, now_):
             if periods and periods[-1][1] is None:
@@ -219,35 +562,59 @@ class DDoSSystem:
         def stats(name, server):
             if getattr(server, "completed_jobs", None) and server.completed_jobs:
                 avg_rt = np.mean(server.completed_jobs)
+                if ac is not None and server is ac:
+                    util = self._analysis_util_rate_based(ac, now)
+                else:
+                    util = self._single_util(server, now)
                 print(f"{name} Completions: {server.total_completions}")
-                print(f"  Lecite  : {server.legal_completions}")
-                print(f"  Illecite: {server.illegal_completions}")
+                if hasattr(server, "legal_completions"):
+                    print(f"  Lecite  : {server.legal_completions}")
+                    print(f"  Illecite: {server.illegal_completions}")
                 print(f"{name} Avg Resp Time: {avg_rt:.6f}")
-                print(f"{name} Utilization: {server.busy_time / now:.6f}")
+                print(f"{name} Utilization: {util:.6f}")
                 print(f"{name} Throughput: {server.total_completions / now:.6f}")
             else:
                 print(f"{name} Completions: 0")
 
+        stats("Web", self.web_server)
+        for i, server in enumerate(self.spike_servers):
+            stats(f"Spike-{i}", server)
+        stats("Mitigation", self.mitigation_manager.center)
+        print(f"Mitigation Discarded : {self.metrics.get('discarded_mitigation', 0)}")
+
+        # --- STATS Analysis (utilizzo corretto rate-based) ---
+        if ac is not None:
+            if getattr(ac, "completed_jobs", None) and ac.completed_jobs:
+                avg_rt_ac = np.mean(ac.completed_jobs)
+                util_ac = self._analysis_util_rate_based(ac, now)
+                thr_ac = _throughput_upto(ac.completion_times, now)
+                print(f"Analysis Completions: {ac.total_completions}")
+                if hasattr(ac, "legal_completions"):
+                    print(f"  Lecite  : {ac.legal_completions}")
+                    print(f"  Illecite: {ac.illegal_completions}")
+                print(f"Analysis Avg Resp Time: {avg_rt_ac:.6f}")
+                print(f"Analysis Utilization:  {util_ac:.6f}")
+                print(f"Analysis Throughput:   {thr_ac:.6f}")
+            else:
+                print("Analysis Completions: 0")
+
+        # CI con finestre
+        print("\n======== INTERVALLI DI CONFIDENZA ========")
+        print("\n-- Web Server --")
+
         def print_ci(label, data, batch_size):
             try:
                 if len(data) < batch_size or len(data) // batch_size < 2:
-                    raise ValueError(f"Solo {len(data)} campioni → insufficienti per almeno 2 batch.")
+                    raise ValueError(f"Solo 0 campioni → insufficienti per almeno 2 batch.")
                 mean, ci = batch_means(data, batch_size)
                 print(f"{label}: {mean:.6f} ± {ci:.6f} (95% CI)")
             except Exception as e:
                 print(f"{label}: errore - {e}")
 
-        stats("Web", self.web_server)
-        for i, server in enumerate(self.spike_servers):
-            stats(f"Spike-{i}", server)
-        stats("Mitigation", center)
-        print(f"Mitigation Discarded : {self.metrics.get('discarded_mitigation', 0)}")
-
-        # CI con finestre per finito/se richiesto
-        print("\n======== INTERVALLI DI CONFIDENZA ========")
-        print("\n-- Web Server --")
         print_ci("Response Time:                           ", self.web_server.completed_jobs, BATCH_SIZE)
-        util_samples, thr_samples = window_util_thr(self.web_server.busy_periods, self.web_server.completion_times, TIME_WINDOW, now)
+        util_samples, thr_samples = window_util_thr(
+            self.web_server.busy_periods, self.web_server.completion_times, TIME_WINDOW, now
+        )
         print_ci("Utilization:                             ", util_samples, TIME_WINDOWS_PER_BATCH)
         print_ci("Throughput:                              ", thr_samples, TIME_WINDOWS_PER_BATCH)
 
@@ -255,37 +622,46 @@ class DDoSSystem:
         for i, server in enumerate(self.spike_servers):
             print(f"Spike-{i}:")
             print_ci("Response Time:                           ", server.completed_jobs, BATCH_SIZE)
-            util_samples, thr_samples = window_util_thr(server.busy_periods, server.completion_times, TIME_WINDOW, now)
+            util_samples, thr_samples = window_util_thr(
+                server.busy_periods, server.completion_times, TIME_WINDOW, now
+            )
             print_ci("Utilization:                             ", util_samples, TIME_WINDOWS_PER_BATCH)
             print_ci("Throughput:                              ", thr_samples, TIME_WINDOWS_PER_BATCH)
 
         print("\n-- Mitigation Center --")
         center = self.mitigation_manager.center
         print_ci("Response Time:                           ", center.completed_jobs, BATCH_SIZE)
-        util_samples, thr_samples = window_util_thr(center.busy_periods, center.completion_times, TIME_WINDOW, now)
+        util_samples, thr_samples = window_util_thr(
+            center.busy_periods, center.completion_times, TIME_WINDOW, now
+        )
         print_ci("Utilization:                             ", util_samples, TIME_WINDOWS_PER_BATCH)
         print_ci("Throughput:                              ", thr_samples, TIME_WINDOWS_PER_BATCH)
 
+        print("\n-- Analysis Center --")
+        if ac is not None:
+            print_ci("Response Time:                           ", ac.completed_jobs, BATCH_SIZE)
+            util_samples_ac, thr_samples_ac = self._window_util_thr_analysis_rate_based(
+                ac, TIME_WINDOW, now
+            )
+            print_ci("Utilization:                             ", util_samples_ac, TIME_WINDOWS_PER_BATCH)
+            print_ci("Throughput:                              ", thr_samples_ac, TIME_WINDOWS_PER_BATCH)
+        else:
+            print("N/A (modello baseline)")
+
         print("\n==== END OF REPORT ====")
 
+    # ---------------------- REPORT (batch means classico) ----------------------
     def report_bm(self,
-              B: int = None,
-              K: int = None,
-              confidence: float = CONFIDENCE_LEVEL,
-              burn_in_rt: int = 0,
-              include_system: bool = False):
+                  B: int = None,
+                  K: int = None,
+                  confidence: float = CONFIDENCE_LEVEL,
+                  burn_in_rt: int = 0,
+                  include_system: bool = False):
         """
         Stampa:
         - CI (t) sui Response Time per centro con Batch Means classico (batch di B completamenti)
         - CI (t) su Utilization e Throughput per centro usando la serie per-batch
-        Parametri:
-        B:           batch size (default = BATCH_SIZE)
-        K:           max num batch (default = N_BATCH) per i RT
-        confidence:  livello di confidenza (es. 0.95)
-        burn_in_rt:  # di completamenti da scartare prima di batchizzare gli RT
-        include_system: se True stampa anche 'System RT' (Web+Spike)
         """
-        # --- setup e chiusura periodi aperti
         B = B or BATCH_SIZE
         K = K or N_BATCH
         now = self.env.now
@@ -294,15 +670,19 @@ class DDoSSystem:
             if periods and periods[-1][1] is None:
                 periods[-1][1] = now_
         self.web_server.update(now)
-        for s in self.spike_servers: s.update(now)
+        for s in self.spike_servers:
+            s.update(now)
         center = self.mitigation_manager.center
         center.update(now)
+        ac = self.mitigation_manager.analysis_center
+        if ac is not None:
+            ac.update(now)
+
         _close_open_busy_periods(self.web_server.busy_periods, now)
         for s in self.spike_servers:
             _close_open_busy_periods(s.busy_periods, now)
         _close_open_busy_periods(center.busy_periods, now)
 
-        # --- helper CI ---
         def _print_ci(label, samples, *, batch_size, n_batches, conf, burn_in=0):
             try:
                 mean, hw = batch_means(
@@ -328,65 +708,69 @@ class DDoSSystem:
         # ====== 1) CI sui Response Time  ======
         print("\n======== INTERVALLI DI CONFIDENZA (Batch Means sui RT) ========")
 
-        # Web
         _print_ci("Web RT",
-                self.web_server.completed_jobs,
-                batch_size=B, n_batches=K, conf=confidence, burn_in=burn_in_rt)
+                  self.web_server.completed_jobs,
+                  batch_size=B, n_batches=K, conf=confidence, burn_in=burn_in_rt)
 
-        # Spike-i
         for i, srv in enumerate(self.spike_servers):
             _print_ci(f"Spike-{i} RT",
-                    srv.completed_jobs,
-                    batch_size=B, n_batches=K, conf=confidence, burn_in=burn_in_rt)
+                      srv.completed_jobs,
+                      batch_size=B, n_batches=K, conf=confidence, burn_in=burn_in_rt)
 
-        # Mitigation
         _print_ci("Mitigation RT",
-                center.completed_jobs,
-                batch_size=B, n_batches=K, conf=confidence, burn_in=burn_in_rt)
+                  center.completed_jobs,
+                  batch_size=B, n_batches=K, conf=confidence, burn_in=burn_in_rt)
 
-        # (Opzionale) System RT = Web + Spike
-        # if include_system:
-        #     sys_rts = list(self.web_server.completed_jobs)
-        #     for s in self.spike_servers:
-        #         sys_rts.extend(s.completed_jobs)
-        #     _print_ci("System RT",
-        #             sys_rts,
-        #             batch_size=B, n_batches=K, conf=confidence, burn_in=burn_in_rt)
+        if ac is not None:
+            _print_ci("Analysis RT",
+                      ac.completed_jobs,
+                      batch_size=B, n_batches=K, conf=confidence, burn_in=burn_in_rt)
 
-        # ====== 2) CI su Utilization e Throughput (serie per-batch) ======
+        # ====== 2) CI su Utilization e Throughput (serie per-batch) ========
         print("\n======== INTERVALLI DI CONFIDENZA (Utilization / Throughput per batch) ========")
 
         def _print_util_thr_ci_for(label_prefix, busy_periods, completion_times):
-            # Costruisco la serie per-batch usando lo stesso B dei RT.
             util_series, thr_series = util_thr_per_batch(
                 busy_periods,
                 completion_times,
                 B=B,
-                burn_in=burn_in_rt,  
+                burn_in=burn_in_rt,
                 k_max=None,
                 tmax=now
             )
-            # t-CI direttamente sulla serie per-batch
             _print_ci(f"{label_prefix} Utilization",
-                    util_series, batch_size=1, n_batches=None, conf=confidence)
+                      util_series, batch_size=1, n_batches=None, conf=confidence)
             _print_ci(f"{label_prefix} Throughput",
-                    thr_series, batch_size=1, n_batches=None, conf=confidence)
+                      thr_series, batch_size=1, n_batches=None, conf=confidence)
 
-        # Web
         _print_util_thr_ci_for("Web",
-                            self.web_server.busy_periods,
-                            self.web_server.completion_times)
+                               self.web_server.busy_periods,
+                               self.web_server.completion_times)
 
-        # Spike-i
         for i, srv in enumerate(self.spike_servers):
             _print_util_thr_ci_for(f"Spike-{i}",
-                                srv.busy_periods,
-                                srv.completion_times)
+                                   srv.busy_periods,
+                                   srv.completion_times)
 
-        # Mitigation
         _print_util_thr_ci_for("Mitigation",
-                            center.busy_periods,
-                            center.completion_times)
+                               center.busy_periods,
+                               center.completion_times)
+
+        if ac is not None:
+            # Per i BM manteniamo l’approccio precedente (serie da UNION).
+            ac_periods = self._get_analysis_busy_periods(ac, now)
+            util_series_ac, thr_series_ac = util_thr_per_batch(
+                ac_periods,
+                ac.completion_times,
+                B=B,
+                burn_in=burn_in_rt,
+                k_max=None,
+                tmax=now
+            )
+            _print_ci("Analysis Utilization",
+                      util_series_ac, batch_size=1, n_batches=None, conf=confidence)
+            _print_ci("Analysis Throughput",
+                      thr_series_ac, batch_size=1, n_batches=None, conf=confidence)
 
         print("\n==== END OF REPORT ====")
 
@@ -394,28 +778,14 @@ class DDoSSystem:
     def report_single_run(self):
         now = self.env.now
         self.web_server.update(now)
-        for s in self.spike_servers: s.update(now)
+        for s in self.spike_servers:
+            s.update(now)
         center = self.mitigation_manager.center
         center.update(now)
 
         ac = self.mitigation_manager.analysis_center
         if ac is not None:
             ac.update(now)
-
-        # fun per chiudere intervalli busy (Web/Spike/Mitigation hanno già busy_periods)
-        def total_busy_time_of(obj):
-            # AnalysisCenter: somma per-core
-            if hasattr(obj, "core_busy_periods"):
-                total = 0.0
-                for periods in obj.core_busy_periods:
-                    for (a, b) in periods:
-                        if b is None:
-                            b = now
-                        if b > a:
-                            total += (b - a)
-                return total
-            # Altri centri
-            return getattr(obj, "busy_time", 0.0)
 
         print("\n==== SIMULATION COMPLETE ====")
         print(f"Total time: {now:.4f}")
@@ -429,16 +799,19 @@ class DDoSSystem:
         print(f"Total discarded jobs: {len(discarded)}")
 
         def stats(name, server):
-            # response time / throughput standard
             if getattr(server, "completed_jobs", None) and server.completed_jobs:
                 avg_rt = np.mean(server.completed_jobs)
-                busy_time = total_busy_time_of(server)
+                ac_local = self.mitigation_manager.analysis_center
+                if ac_local is not None and server is ac_local:
+                    util = self._analysis_util_rate_based(ac_local, now)
+                else:
+                    util = self._single_util(server, now)
                 print(f"{name} Completions: {server.total_completions}")
                 if hasattr(server, "legal_completions"):
                     print(f"  Lecite  : {server.legal_completions}")
                     print(f"  Illecite: {server.illegal_completions}")
                 print(f"{name} Avg Resp Time: {avg_rt:.6f}")
-                print(f"{name} Utilization: {busy_time / now:.6f}")
+                print(f"{name} Utilization: {util:.6f}")
                 print(f"{name} Throughput: {server.total_completions / now:.6f}")
             else:
                 print(f"{name} Completions: 0")
@@ -448,6 +821,7 @@ class DDoSSystem:
             stats(f"Spike-{i}", server)
         stats("Mitigation", center)
 
+        ac = self.mitigation_manager.analysis_center
         if ac is not None:
             stats("Analysis", ac)
             print(f"Analysis capacity drops : {self.metrics.get('discarded_analysis_capacity', 0)}")
@@ -458,13 +832,14 @@ class DDoSSystem:
 
         print(f"Mitigation Discarded : {self.metrics.get('discarded_mitigation', 0)}")
 
-    # (le altre funzioni report_windowing / report_bm le puoi aggiornare in seguito)
-    # -------------------------------------------------------------------------
 
-
-def run_simulation(scenario: str, mode: str, model: str, enable_windowing: bool, 
+# ---------------------------------------------------------------------
+# Runner: single run / standard
+#  - Se lo scenario è uno tra x1/x2/x5/x10/x40, salva/accoda su plot/results_validation_<mode>.csv
+# ---------------------------------------------------------------------
+def run_simulation(scenario: str, mode: str, model: str, enable_windowing: bool,
                    arrival_p=None, arrival_l1=None, arrival_l2=None):
-    
+
     print("Model " + model)
 
     if mode not in ("verification", "standard"):
@@ -477,18 +852,53 @@ def run_simulation(scenario: str, mode: str, model: str, enable_windowing: bool,
     env = simpy.Environment()
     system = DDoSSystem(env, mode, arrival_p, arrival_l1, arrival_l2, variant=model)
     env.run()
-    system.report_single_run()
-    if(enable_windowing == True):
-        system.report_windowing()
-    # CSV: quando vorrai aggiungere le colonne del centro di analisi, estendiamo i fieldnames e l'append_row_stable
 
+    # stampa a video
+    system.report_single_run()
+    if enable_windowing:
+        system.report_windowing()
+
+    # salvataggio CSV di validazione se scenario è quello della validazione
+    if scenario.lower() in {"x1", "x2", "x5", "x10", "x40"}:
+        out_csv = "plot/results_validation_" + model + ".csv"
+        system.export_validation_row(scenario=scenario, out_csv_path=out_csv)
+        print(f"[OK] Riga di validazione salvata in: {out_csv}")
+
+# ---------------------------------------------------------------------
+# Runner: verifica (exp distribuzioni)
+# ---------------------------------------------------------------------
+def run_verification(model: str,
+                     enable_windowing: bool = True,
+                     arrival_p: float = None,
+                     arrival_l1: float = None,
+                     arrival_l2: float = None):
+    print("Model " + model)
+
+    if arrival_p is None:
+        arrival_p = ARRIVAL_P_VERIFICATION
+        arrival_l1 = ARRIVAL_L1_VERIFICATION
+        arrival_l2 = ARRIVAL_L2_VERIFICATION
+
+    env = simpy.Environment()
+    system = DDoSSystem(env, mode="verification",
+                        arrival_p=arrival_p, arrival_l1=arrival_l1, arrival_l2=arrival_l2,
+                        variant=model)
+    env.run()
+
+    system.report_single_run()
+    if enable_windowing:
+        system.report_windowing()
+
+
+# ---------------------------------------------------------------------
+# Fieldnames per CSV transitorio / infinito
+# ---------------------------------------------------------------------
 def transitory_fieldnames(max_spikes: int):
     base = [
         "replica", "time",
         "web_rt_mean", "web_util", "web_throughput",
         "mit_rt_mean", "mit_util", "mit_throughput",
-        # NEW: colonne opzionali per Analysis Center (se attivo)
-        "ana_rt_mean", "ana_util", "ana_throughput",
+        "analysis_rt_mean", "analysis_util", "analysis_throughput",
         "system_rt_mean",
         "arrivals_so_far", "false_positives_so_far", "mitigation_completions_so_far",
         "spikes_count", "scenario", "mode", "is_final",
@@ -501,6 +911,7 @@ def transitory_fieldnames(max_spikes: int):
         base += [f"spike{i}_rt_mean", f"spike{i}_util", f"spike{i}_throughput"]
     return base
 
+
 def infinite_fieldnames(max_spikes: int):
     base = [
         "scenario",
@@ -511,7 +922,7 @@ def infinite_fieldnames(max_spikes: int):
         "web_util_point", "web_throughput_point",
         "mit_rt_mean_bm", "mit_rt_ci_hw",
         "mit_util_point", "mit_throughput_point",
-        # TODO: aggiungere anche analysis_* quando estendiamo il BM per quel centro
+        # (Analysis *_point non inclusi qui; si possono aggiungere se serve)
         "system_rt_mean_bm", "system_rt_ci_hw",
         "illegal_share",
         "processed_legal_share", "processed_illegal_share",
@@ -525,11 +936,15 @@ def infinite_fieldnames(max_spikes: int):
                  f"spike{i}_completions"]
     return base
 
-def run_finite_horizon(mode: str, scenario: str, out_csv: str):
+
+# ---------------------------------------------------------------------
+# Runner: orizzonte finito / transitorio
+# ---------------------------------------------------------------------
+def run_finite_horizon(mode: str, scenario: str, out_csv: str, model: str = "baseline"):
     if os.path.exists(out_csv):
         os.remove(out_csv)
 
-    arrival_p  = ARRIVAL_P
+    arrival_p = ARRIVAL_P
     arrival_l1 = ARRIVAL_L1_x40
     arrival_l2 = ARRIVAL_L2_x40
 
@@ -542,7 +957,7 @@ def run_finite_horizon(mode: str, scenario: str, out_csv: str):
             plantSeeds(seed)
 
             env = simpy.Environment()
-            system = DDoSSystem(env, mode, arrival_p, arrival_l1, arrival_l2)
+            system = DDoSSystem(env, mode, arrival_p, arrival_l1, arrival_l2, variant=model)
 
             def checkpointer_optimized(env, system, rep_id):
                 checkpoint_times = []
@@ -571,7 +986,7 @@ def run_finite_horizon(mode: str, scenario: str, out_csv: str):
         for rep in range(REPLICATION_FACTORY_FINITE_SIMULATION):
             plantSeeds(seeds[rep])
             env = simpy.Environment()
-            system = DDoSSystem(env, mode, arrival_p, arrival_l1, arrival_l2)
+            system = DDoSSystem(env, mode, arrival_p, arrival_l1, arrival_l2, variant=model)
 
             def checkpointer(env, system, rep_id):
                 next_cp = CHECKPOINT_TIME_FINITE_SIMULATION
@@ -603,11 +1018,15 @@ def run_finite_horizon(mode: str, scenario: str, out_csv: str):
     return all_logs
 
 
+# ---------------------------------------------------------------------
+# Runner: orizzonte infinito
+# ---------------------------------------------------------------------
 def run_infinite_horizon(mode: str,
                          out_csv: str,
                          out_acs: str,
                          burn_in: int = 0,
-                         arrival_p=None, arrival_l1=None, arrival_l2=None):
+                         arrival_p=None, arrival_l1=None, arrival_l2=None,
+                         model: str = "baseline"):
     """
     Esegue la simulazione a orizzonte infinito tramite il metodo dei Batch Means,
     calcolando le autocorrelazioni (ACF) sulle metriche di interesse.
@@ -616,16 +1035,16 @@ def run_infinite_horizon(mode: str,
         raise ValueError("mode must be 'verification' or 'standard'")
 
     if arrival_p is None:
-        arrival_p  = ARRIVAL_P
+        arrival_p = ARRIVAL_P
         arrival_l1 = ARRIVAL_L1_x40
         arrival_l2 = ARRIVAL_L2_x40
 
     env = simpy.Environment()
-    system = DDoSSystem(env, mode, arrival_p, arrival_l1, arrival_l2)
+    system = DDoSSystem(env, mode, arrival_p, arrival_l1, arrival_l2, variant=model)
     env.run()
-    # system.report_bm()  # opzionale: abbiamo la versione con Analysis sopra
-    print("\n==== START BATCH MEANS ====")
+    # system.report_bm()  # opzionale
 
+    print("\n==== START BATCH MEANS ====")
     csv_path, cols, k = export_bm_series_to_wide_csv(
         system,
         B=BATCH_SIZE,

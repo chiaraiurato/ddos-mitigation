@@ -1,5 +1,5 @@
 import sys
-from controller.simulation import run_simulation, run_finite_horizon, run_infinite_horizon
+from controller.simulation import run_simulation, run_finite_horizon, run_infinite_horizon, run_verification
 from engineering.costants import *
 from library.rngs import plantSeeds
 
@@ -74,7 +74,7 @@ def run_sim():
 
         # 4) Esecuzione
         if mode == "verification":
-            run_simulation("x1", "verification", model, enable_windowing=True)
+            run_verification(model, enable_windowing=True)
 
         elif mode == "standard":
             run_simulation("x40", "standard", model, enable_windowing=True,
@@ -97,21 +97,22 @@ def run_sim():
 
         elif mode == "transitory":
             logs = run_finite_horizon("transitory", scenario="transitory_x40",
-                                      out_csv="plot/results_transitory.csv")
-            print("\n[OK] Log del transitorio salvati in: plot/results_transitory.csv")
-
+                                      out_csv="plot/results_transitory_" + model + ".csv", 
+                                      model=model)
+            
         elif mode == "finite simulation":
             logs = run_finite_horizon("finite simulation",
-                                      scenario="finite simulation",
-                                      out_csv="plot/results_finite_simulation.csv")
-            print("\n[OK] Log salvati in: plot/results_finite_simulation.csv")
-
+                                        scenario="finite simulation",
+                                        out_csv="plot/results_finite_simulation_" + model + ".csv",
+                                        model=model)
+            
         elif mode == "infinite simulation":
             run_infinite_horizon(
                 mode="standard",
-                out_csv="plot/results_infinite_bm.csv",
-                out_acs="acs_input/acs_input.csv",
-                burn_in=BURN_IN
+                out_csv="plot/results_infinite_bm_" + model + ".csv",
+                out_acs="acs_input/acs_input_ " + model + ".csv",
+                burn_in=BURN_IN,
+                model=model
             )
 
 if __name__ == "__main__":

@@ -1,0 +1,47 @@
+Avvio risoluzione catena di Markov per DDoS Mitigation System...
+Spazio degli stati costruito: 2205 stati
+Costruzione matrice generatrice 2205x2205...
+Processando stato 0/2205
+Processando stato 500/2205
+Processando stato 1000/2205
+Processando stato 1500/2205
+Processando stato 2000/2205
+Risoluzione sistema lineare per probabilità stazionarie...
+Calcolo metriche di performance...
+
+============================================================
+CONFRONTO RISULTATI: MODELLO ANALITICO
+============================================================
+
+UTILIZZAZIONI:
+Mitigation     - Analitico: 0.007334
+Web Server     - Analitico: 0.973864
+Spike Server   - Analitico: 0.082242
+
+THROUGHPUT (job/s):
+Mitigation     - Analitico: 6.666723
+Web Server     - Analitico: 6.086653
+Spike Server   - Analitico: 0.514013
+
+TEMPI DI RISPOSTA (s):
+Mitigation     - Analitico: 0.001108
+Web Server     - Analitico: 1.964790
+Spike Server   - Analitico: 0.339016
+
+ALTRE METRICHE:
+P(Mitigation pieno)    - Analitico: 0.000000
+Tasso arrivi effettivi - Analitico: 6.666666
+Job scartati per FP    - Analitico: 0.066667
+
+PROBABILITÀ DI ROUTING DAL MITIGATION CENTER (condizionate a una partenza):
+→ Web Server          - 0.912898 (91.29%)
+→ Spike Server        - 0.077093 (7.71%)
+→ Scartato (FP)       - 0.010000 (1.00%)
+→ Scartato (Full)     - 0.000009 (0.00%)
+
+CONFRONTO PERCENTUALI:
+Jobs → Web Server     - 91.29%
+Jobs → Spike Server   - 7.71%
+Jobs scartati (FP)    - 1.00%
+
+Tempo di esecuzione: 0.48 secondi

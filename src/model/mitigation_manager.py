@@ -122,18 +122,16 @@ class MitigationManager:
         """
         selectStream(RNG_STREAM_ML_DECISION)
 
-        if job.is_legal:
-            # LECITO → passa con probabilità TPR, altrimenti FN (drop)
-            if random() < P_TPR_ML:
-                self.metrics["ml_pass_legal"] += 1
-                self._forward_to_service_tier(job, completion_time)
-            else:
+        if random() < P_DROP_ML:
+            if job.is_legal:
                 self.metrics["ml_drop_legal"] += 1
+            else:
+                self.metrics["ml_drop_illicit"] += 1
             return
         else:
-            # ILLECITO → scarta con probabilità TNR (TN), altrimenti FP (passa)
-            if random() < P_TNR_ML:
-                self.metrics["ml_drop_illicit"] += 1
+            if job.is_legal:
+                self.metrics["ml_pass_legal"] += 1
+                self._forward_to_service_tier(job, completion_time)
             else:
                 self.metrics["ml_pass_illicit"] += 1
                 self._forward_to_service_tier(job, completion_time)
