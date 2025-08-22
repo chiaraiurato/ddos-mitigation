@@ -5,8 +5,6 @@ from engineering.distributions import get_service_time
 from model.mitigation_center import MitigationCenter
 from model.processor_sharing_server import ProcessorSharingServer
 
-# Centro di Analisi (opzionale nella variante migliorativa)
-
 from model.ml_analysis_center import AnalysisCenter
 
 class MitigationManager:
@@ -26,7 +24,7 @@ class MitigationManager:
         self.metrics = metrics
         self.variant = variant
 
-        # Mitigation invariata
+        
         cap = MITIGATION_CAPACITY_VERIFICATION if self.mode == "verification" else MITIGATION_CAPACITY
         self.center = MitigationCenter(
             env,
@@ -51,9 +49,9 @@ class MitigationManager:
 
         # contatori ML aggiuntivi
         self.metrics.setdefault("discarded_analysis_capacity", 0)
-        self.metrics.setdefault("ml_drop_illicit", 0)  # TN
+        self.metrics.setdefault("ml_drop_illegal", 0)  # TN
         self.metrics.setdefault("ml_drop_legal", 0)    # FN
-        self.metrics.setdefault("ml_pass_illicit", 0)  # FP
+        self.metrics.setdefault("ml_pass_illegal", 0)  # FP
         self.metrics.setdefault("ml_pass_legal", 0)    # TP
 
     # ------- Ingresso dal processo di arrival -------
@@ -117,25 +115,27 @@ class MitigationManager:
     # ------- Callback dopo il servizio di Analisi -------
     def _after_analysis(self, job, completion_time):
         """
-        Chiamata dall'AnalysisCenter quando termina il servizio.
-        Decide (TPR/TNR) se scartare o inoltrare.
+        Classificatore ML con routing probabilistico.
         """
         selectStream(RNG_STREAM_ML_DECISION)
+        u = random()
 
-        if random() < P_DROP_ML:
-            if job.is_legal:
+        if job.is_legal:
+            if u < P_DROP_LEGAL:
                 self.metrics["ml_drop_legal"] += 1
+                return
             else:
-                self.metrics["ml_drop_illicit"] += 1
-            return
-        else:
-            if job.is_legal:
                 self.metrics["ml_pass_legal"] += 1
                 self._forward_to_service_tier(job, completion_time)
+                return
+        else:
+            if u < P_DROP_ILLEGAL:
+                self.metrics["ml_drop_illegal"] += 1
+                return
             else:
-                self.metrics["ml_pass_illicit"] += 1
+                self.metrics["ml_pass_illegal"] += 1
                 self._forward_to_service_tier(job, completion_time)
-            return
+                return
 
     def _forward_to_service_tier(self, job, now):
         selectStream(RNG_STREAM_SERVICE_TIMES)

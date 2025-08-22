@@ -7,7 +7,7 @@ import pandas as pd
 from library.rngs import random, plantSeeds, getSeed, selectStream
 from engineering.costants import *
 from engineering.distributions import get_interarrival_time
-from utils.csv_writer import append_row, append_row_stable
+from utils.csv_writer import append_row_stable, validation_fieldnames, transitory_fieldnames, infinite_fieldnames
 from model.job import Job
 from model.processor_sharing_server import ProcessorSharingServer
 from model.mitigation_manager import MitigationManager
@@ -18,7 +18,7 @@ from engineering.statistics import (
 )
 
 # ---------------------------------------------------------------------
-# fallback per costanti scenario transitorio / finito (se rinominate altrove)
+# fallback per costanti scenario transitorio / finito
 # ---------------------------------------------------------------------
 try:
     STOP_TRANSITORY = STOP_CONDITION_TRANSITORY
@@ -37,44 +37,6 @@ except NameError:
         CHECKPOINT_TRANSITORY = CHECKPOINT_TIME_FINITE_SIMULATION
 
 
-# ---------------------------------------------------------------------
-# CSV di VALIDAZIONE (x1/x2/x5/x10/x40) – fieldnames
-# ---------------------------------------------------------------------
-def validation_fieldnames():
-    return [
-        # scenario & input
-        "scenario", "ARRIVAL_P", "ARRIVAL_L1", "ARRIVAL_L2",
-        # tempo & conteggi
-        "total_time", "total_arrivals",
-        # --- Web (point)
-        "web_util", "web_rt_mean", "web_throughput",
-        # --- Spike-0 (point)
-        "spikes_count", "spike0_util", "spike0_rt_mean", "spike0_throughput",
-        # --- Mitigation (point)
-        "mit_util", "mit_rt_mean", "mit_throughput",
-        # --- Drop rates (per secondo)
-        "drop_fp_rate", "drop_full_rate",
-        # --- Web (BM)
-        "web_util_bm_mean", "web_util_bm_ci",
-        "web_thr_bm_mean",  "web_thr_bm_ci",
-        "web_rt_bm_mean",   "web_rt_bm_ci",
-        # --- Spike-0 (BM)
-        "spike0_util_bm_mean", "spike0_util_bm_ci",
-        "spike0_thr_bm_mean",  "spike0_thr_bm_ci",
-        "spike0_rt_bm_mean",   "spike0_rt_bm_ci",
-        # --- Mitigation (BM)
-        "mit_util_bm_mean", "mit_util_bm_ci",
-        "mit_thr_bm_mean",  "mit_thr_bm_ci",
-        "mit_rt_bm_mean",   "mit_rt_bm_ci",
-        # --- Analysis ML (point, sempre presenti: None se baseline)
-        "analysis_util", "analysis_rt_mean", "analysis_throughput",
-        # --- Analysis ML (BM)
-        "ana_util_bm_mean", "ana_util_bm_ci",
-        "ana_thr_bm_mean",  "ana_thr_bm_ci",
-        "ana_rt_bm_mean",   "ana_rt_bm_ci",
-        # --- Parametri BM usati
-        "bm_rt_batch_size", "bm_win_size", "bm_windows_per_batch"
-    ]
 
 
 class DDoSSystem:
@@ -788,9 +750,9 @@ class DDoSSystem:
         if ac is not None:
             stats("Analysis", ac)
             print(f"Analysis capacity drops : {self.metrics.get('discarded_analysis_capacity', 0)}")
-            print(f"ML  drop illicit (TN)   : {self.metrics.get('ml_drop_illicit', 0)}")
+            print(f"ML  drop illegal (TN)   : {self.metrics.get('ml_drop_illegal', 0)}")
             print(f"ML  drop legal   (FN)   : {self.metrics.get('ml_drop_legal', 0)}")
-            print(f"ML  pass illicit (FP)   : {self.metrics.get('ml_pass_illicit', 0)}")
+            print(f"ML  pass illegal (FP)   : {self.metrics.get('ml_pass_illegal', 0)}")
             print(f"ML  pass legal   (TP)   : {self.metrics.get('ml_pass_legal', 0)}")
 
         print(f"Mitigation Discarded : {self.metrics.get('discarded_mitigation', 0)}")
@@ -850,50 +812,6 @@ def run_verification(model: str,
         system.report_windowing()
 
 
-# ---------------------------------------------------------------------
-# Fieldnames per CSV transitorio / infinito
-# ---------------------------------------------------------------------
-def transitory_fieldnames(max_spikes: int):
-    base = [
-        "replica", "time",
-        "web_rt_mean", "web_util", "web_throughput",
-        "mit_rt_mean", "mit_util", "mit_throughput",
-        "analysis_rt_mean", "analysis_util", "analysis_throughput",
-        "system_rt_mean",
-        "arrivals_so_far", "false_positives_so_far", "mitigation_completions_so_far",
-        "spikes_count", "scenario", "mode", "is_final",
-        "illegal_share",
-        "processed_legal_share", "processed_illegal_share",
-        "completed_legal_share", "completed_illegal_share",
-        "completed_legal_of_completed_share", "completed_illegal_of_completed_share",
-    ]
-    for i in range(MAX_SPIKE_NUMBER):
-        base += [f"spike{i}_rt_mean", f"spike{i}_util", f"spike{i}_throughput"]
-    return base
-
-
-def infinite_fieldnames(max_spikes: int):
-    base = [
-        "scenario",
-        "ARRIVAL_P", "ARRIVAL_L1", "ARRIVAL_L2",
-        "total_time", "total_arrivals",
-        "burn_in_rt", "batch_size", "n_batches", "confidence",
-        "web_rt_mean_bm", "web_rt_ci_hw",
-        "web_util_point", "web_throughput_point",
-        "mit_rt_mean_bm", "mit_rt_ci_hw",
-        "mit_util_point", "mit_throughput_point",
-        "system_rt_mean_bm", "system_rt_ci_hw",
-        "illegal_share",
-        "processed_legal_share", "processed_illegal_share",
-        "completed_legal_share", "completed_illegal_share",
-        "completed_legal_of_completed_share", "completed_illegal_of_completed_share",
-        "spikes_count",
-    ]
-    for i in range(MAX_SPIKE_NUMBER):
-        base += [f"spike{i}_rt_mean_bm", f"spike{i}_rt_ci_hw",
-                 f"spike{i}_util_point", f"spike{i}_thr_point",
-                 f"spike{i}_completions"]
-    return base
 
 
 # ---------------------------------------------------------------------
@@ -1062,10 +980,10 @@ def run_infinite_horizon(mode: str,
 
         cols = [c for c in cols] + ["ana_rt", "ana_util", "ana_thr"]
 
-    # ---- Calcolo ACF con K dinamico (un unico K valido per tutte le colonne selezionate) ----
+    
     df = pd.read_csv(csv_path)
 
-    # Considera solo colonne presenti con almeno 2 osservazioni non-NaN
+    # Considera solo colonne presenti con almeno 2 osservazioni
     cols = [c for c in cols if c in df.columns and df[c].notna().sum() >= 2]
     if not cols:
         print("[WARN] Nessuna colonna con almeno 2 punti per ACF. Salto il calcolo.")
@@ -1081,7 +999,7 @@ def run_infinite_horizon(mode: str,
         res_df = print_autocorrelation(
             file_path=csv_path,
             columns=cols,
-            K_LAG=K_dyn,          # <-- K dinamico
+            K_LAG=K_dyn,          
             threshold=0.2,
             save_csv=out_acs_clean
         )

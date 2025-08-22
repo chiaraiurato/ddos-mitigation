@@ -5,6 +5,7 @@ from library.rngs import plantSeeds
 
 
 def choose_variant():
+    print_banner()
     print("Scegli il MODELLO:")
     print("A. Modello di BASE (solo Mitigation)")
     print("B. Modello MIGLIORATIVO (Mitigation + Analysis Center ML)")
@@ -20,8 +21,9 @@ def choose_variant():
 
 
 def choose_mode():
+
     print("\nScegli la modalità:")
-    print("0. Singola run")
+    print("0. Simulazione senza attacco")
     print("1. Verifica (distribuzioni esponenziali)")
     print("2. Simulazione standard (distribuzioni iperesponenziali)")
     print("3. Validazione (x2, x5, x10, x40)")
@@ -114,6 +116,15 @@ def run_sim():
                 burn_in=BURN_IN,
                 model=model
             )
-
+def print_banner():
+    print(r"""
+██████╗ ██████╗  ██████╗ ███████╗    ███╗   ███╗██╗████████╗██╗ ██████╗  █████╗ ████████╗██╗ ██████╗ ███╗   ██╗
+██╔══██╗██╔══██╗██╔═══██╗██╔════╝    ████╗ ████║██║╚══██╔══╝██║██╔════╝ ██╔══██╗╚══██╔══╝██║██╔═══██╗████╗  ██║
+██║  ██║██║  ██║██║   ██║███████╗    ██╔████╔██║██║   ██║   ██║██║  ███╗███████║   ██║   ██║██║   ██║██╔██╗ ██║
+██║  ██║██║  ██║██║   ██║╚════██║    ██║╚██╔╝██║██║   ██║   ██║██║   ██║██╔══██║   ██║   ██║██║   ██║██║╚██╗██║
+██████╔╝██████╔╝╚██████╔╝███████║    ██║ ╚═╝ ██║██║   ██║   ██║╚██████╔╝██║  ██║   ██║   ██║╚██████╔╝██║ ╚████║
+╚═════╝ ╚═════╝  ╚═════╝ ╚══════╝    ╚═╝     ╚═╝╚═╝   ╚═╝   ╚═╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚═╝ ╚═════╝ ╚═╝  ╚═══╝
+""", flush=True)
+    
 if __name__ == "__main__":
     run_sim()
