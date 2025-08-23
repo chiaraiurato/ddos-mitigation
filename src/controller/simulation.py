@@ -91,46 +91,6 @@ except NameError:
         CHECKPOINT_TRANSITORY = CHECKPOINT_TIME_FINITE_SIMULATION
 
 
-# ---------------------------------------------------------------------
-# CSV di VALIDAZIONE – fieldnames
-# ---------------------------------------------------------------------
-def validation_fieldnames():
-    return [
-        # scenario & input
-        "scenario", "ARRIVAL_P", "ARRIVAL_L1", "ARRIVAL_L2",
-        # tempo & conteggi
-        "total_time", "total_arrivals",
-        # --- Web (point)
-        "web_util", "web_rt_mean", "web_throughput",
-        # --- Spike-0 (point)  -> PRIMO SPIKE SERVER
-        "spikes_count", "spike0_util", "spike0_rt_mean", "spike0_throughput",
-        # --- Mitigation (point)
-        "mit_util", "mit_rt_mean", "mit_throughput",
-        # --- Drop rates (per secondo)
-        "drop_fp_rate", "drop_full_rate",
-        # --- Web (BM)
-        "web_util_bm_mean", "web_util_bm_ci",
-        "web_thr_bm_mean",  "web_thr_bm_ci",
-        "web_rt_bm_mean",   "web_rt_bm_ci",
-        # --- Spike-0 (BM, PRIMO SPIKE SERVER)
-        "spike0_util_bm_mean", "spike0_util_bm_ci",
-        "spike0_thr_bm_mean",  "spike0_thr_bm_ci",
-        "spike0_rt_bm_mean",   "spike0_rt_bm_ci",
-        # --- Mitigation (BM)
-        "mit_util_bm_mean", "mit_util_bm_ci",
-        "mit_thr_bm_mean",  "mit_thr_bm_ci",
-        "mit_rt_bm_mean",   "mit_rt_bm_ci",
-        # --- Analysis ML (point, sempre presenti: None se baseline)
-        "analysis_util", "analysis_rt_mean", "analysis_throughput",
-        # --- Analysis ML (BM)
-        "ana_util_bm_mean", "ana_util_bm_ci",
-        "ana_thr_bm_mean",  "ana_thr_bm_ci",
-        "ana_rt_bm_mean",   "ana_rt_bm_ci",
-        # --- Parametri BM usati
-        "bm_rt_batch_size", "bm_win_size", "bm_windows_per_batch"
-    ]
-
-
 class DDoSSystem:
     def __init__(self, env, mode, arrival_p, arrival_l1, arrival_l2, variant):
         self.env = env
