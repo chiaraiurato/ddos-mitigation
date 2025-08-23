@@ -18,10 +18,9 @@ class DDoSMarkovChain:
         self.K_spike = 20             # Capacità spike server
         
         # Probabilità
-        self.p_lecito = 0.10          # Probabilità pacchetto lecito
-        self.p_illecito = 0.89        # Probabilità pacchetto illecito
-        self.p_fp = 0.01              # Probabilità falso positivo
-        
+        self.p_discard = 0.01         # Probabilità pacchetto illecito
+        self.p_forward = 0.99        # Probabilità pacchetto lecito
+
         # Spazio degli stati: (i, w, s)
         # i: jobs in mitigation (0-4), w: jobs in web (0-20), s: jobs in spike (0-20)
         self.states = []
@@ -55,27 +54,23 @@ class DDoSMarkovChain:
         # 2. COMPLETAMENTI nel centro di mitigazione
         if i2 == i1 - 1 and i1 > 0:
             # Il job può essere:
-            # a) Scartato per falso positivo
+            # a) Scartato per falso positivo + classificato come illecito
             if w2 == w1 and s2 == s1:
                 # Probabilità di essere scartato
-                p_discard = self.p_lecito * self.p_fp + self.p_illecito * self.p_fp
-                rate += self.mu_mitigation * p_discard
+                rate += self.mu_mitigation * self.p_discard
             
             # b) Inoltrato al web server (se non saturo)
             elif w2 == w1 + 1 and s2 == s1 and w1 < self.K_web:
-                # Probabilità di essere inoltrato (non scartato)
-                p_forward = 1 - (self.p_lecito * self.p_fp + self.p_illecito * self.p_fp)
-                rate += self.mu_mitigation * p_forward
+                # Probabilità di essere inoltrato 
+                rate += self.mu_mitigation * self.p_forward
             
             # c) Inoltrato al spike server (se web saturo e spike non saturo)
             elif w2 == w1 and s2 == s1 + 1 and w1 >= self.K_web and s1 < self.K_spike:
-                p_forward = 1 - (self.p_lecito * self.p_fp + self.p_illecito * self.p_fp)
-                rate += self.mu_mitigation * p_forward
+                rate += self.mu_mitigation * self.p_forward
             
             # d) Scartato perché entrambi i server sono saturi
             elif w2 == w1 and s2 == s1 and w1 >= self.K_web and s1 >= self.K_spike:
-                p_forward = 1 - (self.p_lecito * self.p_fp + self.p_illecito * self.p_fp)
-                rate += self.mu_mitigation * p_forward
+                rate += self.mu_mitigation * self.p_forward
         
         # 3. COMPLETAMENTI nel web server (Processor Sharing)
         if i2 == i1 and w2 == w1 - 1 and s2 == s1 and w1 > 0:
@@ -138,7 +133,6 @@ class DDoSMarkovChain:
         return pi
     
     def calculate_metrics(self, pi):
-        """Calcola le metriche di performance (incluso il Mitigation)."""
         print("Calcolo metriche di performance...")
 
         # Utilizzazioni
@@ -159,7 +153,7 @@ class DDoSMarkovChain:
         # Probabilità di routing dal mitigation center (condizionate a una partenza dal centro)
         prob_route_to_web = 0.0
         prob_route_to_spike = 0.0
-        prob_discarded_fp = 0.0
+        prob_discarded = 0.0
         prob_discarded_full = 0.0
         total_mitigation_departures = 0.0
 
@@ -169,7 +163,7 @@ class DDoSMarkovChain:
         for idx, (i, w, s) in enumerate(self.states):
             prob = pi[idx]
 
-            # Mitigation pieno?
+            # Mitigation pieno
             if i == self.K_mitigation:
                 prob_mitigation_full += prob
 
@@ -200,18 +194,15 @@ class DDoSMarkovChain:
                 departure_rate = prob * self.mu_mitigation
                 total_mitigation_departures += departure_rate
 
-                # drop per falso positivo (vale sia per lecito che illecito)
-                p_fp_discard = self.p_fp  # perché p_lecito+p_illecito≈1
-                prob_discarded_fp += departure_rate * p_fp_discard
+                # drop (vale sia per lecito che illecito)
+                prob_discarded += departure_rate * self.p_discard
 
-                # inoltro (non FP)
-                p_forward = 1.0 - p_fp_discard
                 if w < self.K_web:
-                    prob_route_to_web += departure_rate * p_forward
+                    prob_route_to_web += departure_rate * self.p_forward
                 elif s < self.K_spike:
-                    prob_route_to_spike += departure_rate * p_forward
+                    prob_route_to_spike += departure_rate * self.p_forward
                 else:
-                    prob_discarded_full += departure_rate * p_forward
+                    prob_discarded_full += departure_rate * self.p_forward
 
         # Tasso di arrivo effettivo al sistema (blocchi se Mitigation è pieno)
         effective_arrival_rate = self.lambda_arrival * (1.0 - prob_mitigation_full)
@@ -220,7 +211,7 @@ class DDoSMarkovChain:
         if total_mitigation_departures > 0:
             prob_route_to_web   /= total_mitigation_departures
             prob_route_to_spike /= total_mitigation_departures
-            prob_discarded_fp   /= total_mitigation_departures
+            prob_discarded   /= total_mitigation_departures
             prob_discarded_full /= total_mitigation_departures
 
         # Tempi di risposta (Little: T = N / λ_eff_out)
@@ -229,7 +220,7 @@ class DDoSMarkovChain:
         resp_time_spike      = (avg_jobs_spike      / throughput_spike)      if throughput_spike      > 0 else 0.0
 
         # Tasso di job scartati per FP (tra le partenze dal Mitigation)
-        jobs_discarded_fp_rate = throughput_mitigation * prob_discarded_fp if total_mitigation_departures > 0 else 0.0
+        jobs_discarded_rate = throughput_mitigation * self.p_discard if total_mitigation_departures > 0 else 0.0
 
         return {
             'utilizations': {
@@ -255,12 +246,12 @@ class DDoSMarkovChain:
             'routing_probabilities': {
                 'to_web': prob_route_to_web,
                 'to_spike': prob_route_to_spike,
-                'discarded_fp': prob_discarded_fp,
+                'discarded': prob_discarded,
                 'discarded_full': prob_discarded_full
             },
             'rates': {
                 'effective_arrival': effective_arrival_rate,
-                'jobs_discarded_fp': jobs_discarded_fp_rate
+                'jobs_discarded': jobs_discarded_rate
             },
             'probabilities': {
                 'mitigation_full': prob_mitigation_full
@@ -300,14 +291,13 @@ class DDoSMarkovChain:
         print(f"\nALTRE METRICHE:")
         print(f"P(Mitigation pieno)    - Analitico: {metrics['probabilities']['mitigation_full']:.6f}")
         print(f"Tasso arrivi effettivi - Analitico: {metrics['rates']['effective_arrival']:.6f}")
-        print(f"Job scartati per FP    - Analitico: {metrics['rates']['jobs_discarded_fp']:.6f}")
+        print(f"Job scartati poiché classificati illeciti    - Analitico: {metrics['rates']['jobs_discarded']:.6f}")
 
         # ROUTING DAL MITIGATION
         print(f"\nPROBABILITÀ DI ROUTING DAL MITIGATION CENTER (condizionate a una partenza):")
-        print(f"→ Web Server          - {metrics['routing_probabilities']['to_web']:.6f} ({metrics['routing_probabilities']['to_web']*100:.2f}%)")
-        print(f"→ Spike Server        - {metrics['routing_probabilities']['to_spike']:.6f} ({metrics['routing_probabilities']['to_spike']*100:.2f}%)")
-        print(f"→ Scartato (FP)       - {metrics['routing_probabilities']['discarded_fp']:.6f} ({metrics['routing_probabilities']['discarded_fp']*100:.2f}%)")
-        print(f"→ Scartato (Full)     - {metrics['routing_probabilities']['discarded_full']:.6f} ({metrics['routing_probabilities']['discarded_full']*100:.2f}%)")
+        print(f"→ Web Server                 - {metrics['routing_probabilities']['to_web']:.6f} ({metrics['routing_probabilities']['to_web']*100:.2f}%)")
+        print(f"→ Spike Server               - {metrics['routing_probabilities']['to_spike']:.6f} ({metrics['routing_probabilities']['to_spike']*100:.2f}%)")
+        print(f"→ Rifiutato da entrambi      - {metrics['routing_probabilities']['discarded_full']:.6f} ({metrics['routing_probabilities']['discarded_full']*100:.2f}%)")
 
         # Confronto percentuali con la simulazione (grezzo, sui conteggi finali)
         sim_total_departures_from_mit = sim_web_completions + sim_spike_completions + sim_fp_dropped
@@ -318,7 +308,7 @@ class DDoSMarkovChain:
         print(f"\nCONFRONTO PERCENTUALI:")
         print(f"Jobs → Web Server     - {metrics['routing_probabilities']['to_web']*100:.2f}%")
         print(f"Jobs → Spike Server   - {metrics['routing_probabilities']['to_spike']*100:.2f}%")
-        print(f"Jobs scartati (FP)    - {metrics['routing_probabilities']['discarded_fp']*100:.2f}%")
+        print(f"Jobs scartati        - {metrics['routing_probabilities']['discarded']*100:.2f}%")
 
 def main():
     print("Avvio risoluzione catena di Markov per DDoS Mitigation System...")
