@@ -60,7 +60,7 @@ class AnalysisCenter:
             self.completed_jobs.append(now - job.arrival)  # RT locale al centro
             self.completion_times.append(now)
             self.total_completions += 1
-            if getattr(job, "is_legal", False):
+            if job.is_legal:
                 self.legal_completions += 1
             else:
                 self.illegal_completions += 1

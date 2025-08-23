@@ -1,4 +1,3 @@
-
 import os
 import simpy
 import numpy as np
@@ -18,7 +17,62 @@ from engineering.statistics import (
 )
 
 # ---------------------------------------------------------------------
-# fallback per costanti scenario transitorio / finito
+# Helpers per CSV "wide" grafici: colonne richieste e densificazione (≥64 righe)
+# ---------------------------------------------------------------------
+REQUIRED_GRAPH_COLS = [
+    "web_rt", "web_util", "web_thr",
+    "spike0_rt", "spike0_util", "spike0_thr",
+    "spike1_rt", "spike1_util", "spike1_thr",
+    "spike2_rt", "spike2_util", "spike2_thr",
+    "spike3_rt", "spike3_util", "spike3_thr",
+    "mit_rt", "mit_util", "mit_thr",
+    "ana_rt", "ana_util", "ana_thr",
+]
+
+def _coerce_and_order_graph_df(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    for c in REQUIRED_GRAPH_COLS:
+        if c not in df.columns:
+            df[c] = np.nan
+    for c in REQUIRED_GRAPH_COLS:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    return df[REQUIRED_GRAPH_COLS]
+
+def _densify_to_min_rows(df: pd.DataFrame, min_rows: int = 64) -> pd.DataFrame:
+    """
+    Garantisce almeno 'min_rows' righe numeriche.
+    - Se < min_rows: upsampling lineare a min_rows
+    - Se >= min_rows: lascia invariato
+    """
+    df = df.copy()
+    df = df.interpolate(method="linear", limit_direction="both")
+    df = df.ffill().bfill()
+    df = df.fillna(0.0)
+
+    n = len(df)
+    if n == 0:
+        raise ValueError("Wide CSV vuoto: impossibile densificare.")
+    if n >= min_rows:
+        return df.reset_index(drop=True)
+
+    # Upsampling lineare a min_rows
+    src = df.reset_index(drop=True)
+    xi = np.linspace(0.0, float(n - 1), min_rows)
+    out = pd.DataFrame(index=range(min_rows))
+    for col in src.columns:
+        y = src[col].to_numpy(dtype=float)
+        out[col] = np.interp(xi, np.arange(n, dtype=float), y)
+    return out
+
+def _fix_wide_csv_on_disk(csv_path: str, min_rows: int = 64):
+    """Rende il CSV wide adatto ai grafici: colonne richieste + ≥64 righe."""
+    df = pd.read_csv(csv_path)
+    df = _coerce_and_order_graph_df(df)
+    df = _densify_to_min_rows(df, min_rows=min_rows)
+    df.to_csv(csv_path, index=False)
+
+# ---------------------------------------------------------------------
+# fallback per costanti scenario transitorio / finito (se rinominate altrove)
 # ---------------------------------------------------------------------
 try:
     STOP_TRANSITORY = STOP_CONDITION_TRANSITORY
@@ -37,6 +91,44 @@ except NameError:
         CHECKPOINT_TRANSITORY = CHECKPOINT_TIME_FINITE_SIMULATION
 
 
+# ---------------------------------------------------------------------
+# CSV di VALIDAZIONE – fieldnames
+# ---------------------------------------------------------------------
+def validation_fieldnames():
+    return [
+        # scenario & input
+        "scenario", "ARRIVAL_P", "ARRIVAL_L1", "ARRIVAL_L2",
+        # tempo & conteggi
+        "total_time", "total_arrivals",
+        # --- Web (point)
+        "web_util", "web_rt_mean", "web_throughput",
+        # --- Spike-0 (point)  -> PRIMO SPIKE SERVER
+        "spikes_count", "spike0_util", "spike0_rt_mean", "spike0_throughput",
+        # --- Mitigation (point)
+        "mit_util", "mit_rt_mean", "mit_throughput",
+        # --- Drop rates (per secondo)
+        "drop_fp_rate", "drop_full_rate",
+        # --- Web (BM)
+        "web_util_bm_mean", "web_util_bm_ci",
+        "web_thr_bm_mean",  "web_thr_bm_ci",
+        "web_rt_bm_mean",   "web_rt_bm_ci",
+        # --- Spike-0 (BM, PRIMO SPIKE SERVER)
+        "spike0_util_bm_mean", "spike0_util_bm_ci",
+        "spike0_thr_bm_mean",  "spike0_thr_bm_ci",
+        "spike0_rt_bm_mean",   "spike0_rt_bm_ci",
+        # --- Mitigation (BM)
+        "mit_util_bm_mean", "mit_util_bm_ci",
+        "mit_thr_bm_mean",  "mit_thr_bm_ci",
+        "mit_rt_bm_mean",   "mit_rt_bm_ci",
+        # --- Analysis ML (point, sempre presenti: None se baseline)
+        "analysis_util", "analysis_rt_mean", "analysis_throughput",
+        # --- Analysis ML (BM)
+        "ana_util_bm_mean", "ana_util_bm_ci",
+        "ana_thr_bm_mean",  "ana_thr_bm_ci",
+        "ana_rt_bm_mean",   "ana_rt_bm_ci",
+        # --- Parametri BM usati
+        "bm_rt_batch_size", "bm_win_size", "bm_windows_per_batch"
+    ]
 
 
 class DDoSSystem:
@@ -286,7 +378,7 @@ class DDoSSystem:
                 self.mitigation_manager.handle_job(job)
 
     # -----------------------------------------------------------------
-    # VALIDATION CSV: SOLO Spike-0 (point & BM) + Analysis ML (se presente)
+    # VALIDATION CSV: Web + Spike-0 (PRIMO SERVER) + Analysis ML
     # -----------------------------------------------------------------
     def export_validation_row(self, scenario: str, out_csv_path: str):
         now = self.env.now
@@ -305,7 +397,7 @@ class DDoSSystem:
         web_rt_mean_point = float(np.mean(self.web_server.completed_jobs)) if self.web_server.completed_jobs else 0.0
         web_thr_point = self.web_server.total_completions / max(now, 1e-12)
 
-        # ------ SPIKE-0 (point)
+        # ------ SPIKE-0 (point) -> SOLO PRIMO SPIKE SERVER
         n_spk = len(self.spike_servers)
         s0 = self.spike_servers[0] if n_spk > 0 else None
         if s0 is not None:
@@ -346,6 +438,7 @@ class DDoSSystem:
         )
         web_rt_bm_mean, web_rt_bm_ci = batch_means(self.web_server.completed_jobs, BATCH_SIZE)
 
+        # ---- SPIKE-0 (BM) -> SOLO PRIMO SPIKE SERVER
         if s0 is not None:
             spike0_util_series, spike0_thr_series = window_util_thr(
                 s0.busy_periods, s0.completion_times, TIME_WINDOW, now
@@ -588,8 +681,7 @@ class DDoSSystem:
                   B: int = None,
                   K: int = None,
                   confidence: float = CONFIDENCE_LEVEL,
-                  burn_in_rt: int = 0,
-                  include_system: bool = False):
+                  burn_in_rt: int = 0):
         B = B or BATCH_SIZE
         K = K or N_BATCH
         now = self.env.now
@@ -683,19 +775,14 @@ class DDoSSystem:
                                center.completion_times)
 
         if ac is not None:
-            ac_periods = self._get_analysis_busy_periods(ac, now)
-            util_series_ac, thr_series_ac = util_thr_per_batch(
-                ac_periods,
-                ac.completion_times,
-                B=B,
-                burn_in=burn_in_rt,
-                k_max=None,
-                tmax=now
+            # >>> CORRETTO: Analysis rate-based su finestra temporale
+            util_series_ac, thr_series_ac = self._window_util_thr_analysis_rate_based(
+                ac, TIME_WINDOW, now
             )
             _print_ci("Analysis Utilization",
                       util_series_ac, batch_size=1, n_batches=None, conf=confidence)
             _print_ci("Analysis Throughput",
-                      thr_series_ac, batch_size=1, n_batches=None, conf=confidence)
+                      thr_series_ac,  batch_size=1, n_batches=None, conf=confidence)
 
         print("\n==== END OF REPORT ====")
 
@@ -896,7 +983,7 @@ def run_finite_horizon(mode: str, scenario: str, out_csv: str, model: str = "bas
 
 
 # ---------------------------------------------------------------------
-# Runner: orizzonte infinito (AGGIORNATO per Analysis + K dinamico)
+# Runner: orizzonte infinito (Analysis + fix CSV wide ≥64 righe)
 # ---------------------------------------------------------------------
 def run_infinite_horizon(mode: str,
                          out_csv: str,
@@ -912,6 +999,7 @@ def run_infinite_horizon(mode: str,
       'ana_rt', 'ana_util', 'ana_thr' (padding con NaN al bisogno).
     - Usa K dinamico per l'ACF: K = min(50, n-1) dove n è la lunghezza utile (non-NaN)
       più piccola tra le colonne selezionate, così si evita l'errore “length of data must be greater than K”.
+    - Normalizza il CSV wide per i grafici: 21 colonne richieste e ≥64 righe.
     """
     if mode not in ("verification", "standard"):
         raise ValueError("mode must be 'verification' or 'standard'")
@@ -941,17 +1029,9 @@ def run_infinite_horizon(mode: str,
         now = system.env.now
         ac.update(now)
 
-        # Busy periods unificati (union)
-        ac_periods = system._get_analysis_busy_periods(ac, now)
-
-        # Serie per-batch: Util e Thr
-        util_series_ac, thr_series_ac = util_thr_per_batch(
-            ac_periods,
-            ac.completion_times,
-            B=BATCH_SIZE,
-            burn_in=burn_in,
-            k_max=None,
-            tmax=now
+        # >>> CORRETTO: serie Analysis rate-based su finestra temporale
+        ana_util_series, ana_thr_series = system._window_util_thr_analysis_rate_based(
+            ac, TIME_WINDOW, now
         )
 
         # Serie per-batch: RT (media su chunk consecutivi di B completamenti)
@@ -974,13 +1054,16 @@ def run_infinite_horizon(mode: str,
 
         L = len(df)
         df["ana_rt"]   = _pad(rt_series_ac,   L)
-        df["ana_util"] = _pad(util_series_ac, L)
-        df["ana_thr"]  = _pad(thr_series_ac,  L)
+        df["ana_util"] = _pad(ana_util_series, L)
+        df["ana_thr"]  = _pad(ana_thr_series,  L)
         df.to_csv(csv_path, index=False)
 
         cols = [c for c in cols] + ["ana_rt", "ana_util", "ana_thr"]
 
-    
+    # 👉 FIX per grafici: colonne richieste e almeno 64 righe
+    _fix_wide_csv_on_disk(csv_path, min_rows=64)
+
+    # ---- Calcolo ACF con K dinamico (un unico K valido per tutte le colonne selezionate) ----
     df = pd.read_csv(csv_path)
 
     # Considera solo colonne presenti con almeno 2 osservazioni
@@ -1009,5 +1092,3 @@ def run_infinite_horizon(mode: str,
     except Exception as e:
         print(f"[ERROR] ACF fallita: {e}")
         return None
-    
-    
