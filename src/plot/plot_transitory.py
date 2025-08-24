@@ -24,9 +24,13 @@ REP_COL  = "replica"
 
 # Metriche richieste (se mancano nel CSV vengono ignorate)
 METRICS = [
-    "web_rt_mean", "mit_rt_mean",
-    "web_util", "web_throughput",
-    "mit_util", "mit_throughput",
+    # Web
+    "web_rt_mean", "web_util", "web_throughput",
+    # Spike-0 (aggiunte)
+    "spike0_rt_mean", "spike0_util", "spike0_throughput",
+    # Mitigation
+    "mit_rt_mean", "mit_util", "mit_throughput",
+    # Altre info utili
     "spikes_count",
 ]
 
@@ -54,6 +58,25 @@ def metric_to_label(metric: str) -> str:
     if metric == "spikes_count":
         return "Spike allocati"
     return metric
+
+def pretty_title(metric: str) -> str:
+    if metric.startswith("web_"):
+        who = "Web"
+    elif metric.startswith("spike0_"):
+        who = "Spike-0"
+    elif metric.startswith("mit_"):
+        who = "Mitigation"
+    else:
+        who = metric.split("_")[0].capitalize()
+    if metric.endswith("rt_mean"):
+        what = "RT medio"
+    elif metric.endswith("util"):
+        what = "Utilizzazione"
+    elif metric.endswith("throughput"):
+        what = "Throughput"
+    else:
+        what = metric
+    return f"{who} — {what} (transitorio, per scenario)"
 
 def build_label_map(df: pd.DataFrame, seeds: List[int]):
     """Ritorna un dict {replica_val -> 'scenario-i (seed)'}. """
@@ -105,7 +128,7 @@ def spaghetti_by_scenario(df: pd.DataFrame,
 
     plt.xlabel(xlabel)
     plt.ylabel(metric_to_label(metric))
-    plt.title(f"{metric} — transitorio (per scenario)")
+    plt.title(pretty_title(metric))
     plt.grid(True)
     plt.legend(title="Scenario (seed)", loc="best", fontsize="small")
     plt.tight_layout()
@@ -156,7 +179,7 @@ def spaghetti_util_zoom_by_scenario(df: pd.DataFrame,
 
     plt.xlabel(xlabel)
     plt.ylabel(metric_to_label(metric))
-    plt.title(f"{metric} — transitorio (per scenario, zoom)")
+    plt.title(pretty_title(metric) + " (zoom)")
     plt.grid(True)
     plt.legend(title="Scenario (seed)", loc="best", fontsize="small")
     plt.tight_layout()
@@ -202,7 +225,6 @@ def main():
 
     print(f"[OK] Grafici salvati in: {outdir.resolve()}")
 
-# Esempio:
-# python plot_transitory.py --csv results_transitory.csv --time-unit s --vline 200000
+# python3 plot_transitory.py --csv results_transitory_baseline.csv --time-unit s 
 if __name__ == "__main__":
     main()
