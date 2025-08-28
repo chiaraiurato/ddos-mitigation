@@ -16,9 +16,7 @@ from engineering.statistics import (
     util_thr_per_batch, window_util_thr
 )
 
-# ---------------------------------------------------------------------
-# Helpers per CSV "wide" grafici: colonne richieste e densificazione (≥64 righe)
-# ---------------------------------------------------------------------
+
 REQUIRED_GRAPH_COLS = [
     "web_rt", "web_util", "web_thr",
     "spike0_rt", "spike0_util", "spike0_thr",
@@ -55,7 +53,6 @@ def _densify_to_min_rows(df: pd.DataFrame, min_rows: int = 64) -> pd.DataFrame:
     if n >= min_rows:
         return df.reset_index(drop=True)
 
-    # Upsampling lineare a min_rows
     src = df.reset_index(drop=True)
     xi = np.linspace(0.0, float(n - 1), min_rows)
     out = pd.DataFrame(index=range(min_rows))
@@ -71,9 +68,6 @@ def _fix_wide_csv_on_disk(csv_path: str, min_rows: int = 64):
     df = _densify_to_min_rows(df, min_rows=min_rows)
     df.to_csv(csv_path, index=False)
 
-# ---------------------------------------------------------------------
-# fallback per costanti scenario transitorio / finito (se rinominate altrove)
-# ---------------------------------------------------------------------
 try:
     STOP_TRANSITORY = STOP_CONDITION_TRANSITORY
 except NameError:
@@ -90,7 +84,6 @@ except NameError:
     except NameError:
         CHECKPOINT_TRANSITORY = CHECKPOINT_TIME_FINITE_SIMULATION
 
-
 class DDoSSystem:
     def __init__(self, env, mode, arrival_p, arrival_l1, arrival_l2, variant):
         self.env = env
@@ -104,7 +97,6 @@ class DDoSSystem:
         self.web_server = ProcessorSharingServer(env, "Web")
         self.spike_servers = [ProcessorSharingServer(env, "Spike-0")]
 
-        # Metriche globali
         self.metrics = {
             "mitigation_completions": 0,
             "total_arrivals": 0,
@@ -120,9 +112,6 @@ class DDoSSystem:
 
         self.env.process(self.arrival_process(mode))
 
-    # -----------------------------------------------------------------
-    # Helper: busy periods del centro di Analisi (UNION, solo fallback)
-    # -----------------------------------------------------------------
     def _get_analysis_busy_periods(self, ac, now):
         periods = getattr(ac, "busy_periods", None)
         if periods is not None:
@@ -155,15 +144,9 @@ class DDoSSystem:
                     merged[-1][1] = b
         return [(a, b) for a, b in merged]
 
-    # -----------------------------------------------------------------
-    # Helper: utilizzo corretto (single-server)
-    # -----------------------------------------------------------------
     def _single_util(self, server, now):
         return getattr(server, "busy_time", 0.0) / max(now, 1e-12)
 
-    # -----------------------------------------------------------------
-    # Helper: utilizzo Analysis rate-based (coerente con Markov)
-    # -----------------------------------------------------------------
     def _analysis_util_rate_based(self, ac, now):
         c = getattr(ac, "num_cores", getattr(ac, "cores", 1))
         if c is None or c <= 0:
@@ -192,7 +175,6 @@ class DDoSSystem:
         times = list(getattr(ac, "completion_times", []))
         rts = list(getattr(ac, "completed_jobs", []))
 
-        # allineamento: rts[k] completa in times[k]
         n = min(len(times), len(rts))
         pairs = [(times[k], rts[k]) for k in range(n) if times[k] <= tmax]
 
@@ -210,7 +192,6 @@ class DDoSSystem:
             t += window
         return util_samples, thr_samples
 
-    # ---------------------- SNAPSHOT (orizzonte finito) ----------------------
     def snapshot(self, when, replica_id=None):
         self.web_server.update(when)
         for s in self.spike_servers:
@@ -225,13 +206,11 @@ class DDoSSystem:
             "replica": int(replica_id) if replica_id is not None else None,
             "time": float(when),
 
-            # Web
             "web_rt_mean": _rt_mean_upto(self.web_server.completed_jobs,
                                          self.web_server.completion_times, when),
             "web_util": _utilization_upto(self.web_server.busy_periods, when),
             "web_throughput": _throughput_upto(self.web_server.completion_times, when),
 
-            # Mitigation
             "mit_rt_mean": _rt_mean_upto(center.completed_jobs, center.completion_times, when),
             "mit_util": _utilization_upto(center.busy_periods, when),
             "mit_throughput": _throughput_upto(center.completion_times, when),
@@ -292,7 +271,6 @@ class DDoSSystem:
 
         return row
 
-    # ---------------------- ARRIVALS ----------------------
     def arrival_process(self, mode):
         if mode == "verification":
             arrivals = N_ARRIVALS_VERIFICATION
@@ -305,7 +283,7 @@ class DDoSSystem:
             arrivals = N_ARRIVALS_BATCH_MEANS
             interarrival_mode = "standard"
             stop_on_arrivals = True
-        else:  # "standard"
+        else:
             arrivals = N_ARRIVALS
             interarrival_mode = "standard"
             stop_on_arrivals = True
@@ -337,9 +315,6 @@ class DDoSSystem:
                 job = Job(self.metrics["total_arrivals"], arrival_time, None, is_legal)
                 self.mitigation_manager.handle_job(job)
 
-    # -----------------------------------------------------------------
-    # VALIDATION CSV: Web + Spike-0 (PRIMO SERVER) + Analysis ML
-    # -----------------------------------------------------------------
     def export_validation_row(self, scenario: str, out_csv_path: str):
         now = self.env.now
 
@@ -352,12 +327,10 @@ class DDoSSystem:
         if ac is not None:
             ac.update(now)
 
-        # ------ WEB (point)
         web_util_point = self._single_util(self.web_server, now)
         web_rt_mean_point = float(np.mean(self.web_server.completed_jobs)) if self.web_server.completed_jobs else 0.0
         web_thr_point = self.web_server.total_completions / max(now, 1e-12)
 
-        # ------ SPIKE-0 (point) -> SOLO PRIMO SPIKE SERVER
         n_spk = len(self.spike_servers)
         s0 = self.spike_servers[0] if n_spk > 0 else None
         if s0 is not None:
@@ -369,12 +342,10 @@ class DDoSSystem:
             spike0_rt_mean_point = 0.0
             spike0_thr_point = 0.0
 
-        # ------ MITIGATION (point)
         mit_util_point = self._single_util(center, now)
         mit_rt_mean_point = float(np.mean(center.completed_jobs)) if center.completed_jobs else 0.0
         mit_thr_point = center.total_completions / max(now, 1e-12)
 
-        # ------ ANALYSIS (point)
         if ac is not None:
             ana_util_point = self._analysis_util_rate_based(ac, now)
             ana_rt_mean_point = float(np.mean(ac.completed_jobs)) if ac.completed_jobs else 0.0
@@ -384,7 +355,6 @@ class DDoSSystem:
             ana_rt_mean_point = None
             ana_thr_point = None
 
-        # ------ Drop rates
         drop_fp_rate = self.metrics.get("false_positives", 0) / max(now, 1e-12)
         drop_full_rate = (
             self.metrics.get("discarded_mitigation", 0)
@@ -392,13 +362,11 @@ class DDoSSystem:
             + self.metrics.get("discarded_analysis_capacity", 0)
         ) / max(now, 1e-12)
 
-        # ================= Batch Means / Windowing =================
         web_util_series, web_thr_series = window_util_thr(
             self.web_server.busy_periods, self.web_server.completion_times, TIME_WINDOW, now
         )
         web_rt_bm_mean, web_rt_bm_ci = batch_means(self.web_server.completed_jobs, BATCH_SIZE)
 
-        # ---- SPIKE-0 (BM) -> SOLO PRIMO SPIKE SERVER
         if s0 is not None:
             spike0_util_series, spike0_thr_series = window_util_thr(
                 s0.busy_periods, s0.completion_times, TIME_WINDOW, now
@@ -515,7 +483,6 @@ class DDoSSystem:
         fns = validation_fieldnames()
         append_row_stable(out_csv_path, row, fns)
 
-    # ---------------------- REPORT (windowing) ----------------------
     def report_windowing(self):
         now = self.env.now
         self.web_server.update(now)
@@ -636,7 +603,6 @@ class DDoSSystem:
 
         print("\n==== END OF REPORT ====")
 
-    # ---------------------- REPORT (batch means classico) ----------------------
     def report_bm(self,
                   B: int = None,
                   K: int = None,
@@ -735,7 +701,6 @@ class DDoSSystem:
                                center.completion_times)
 
         if ac is not None:
-            # >>> CORRETTO: Analysis rate-based su finestra temporale
             util_series_ac, thr_series_ac = self._window_util_thr_analysis_rate_based(
                 ac, TIME_WINDOW, now
             )
@@ -746,7 +711,6 @@ class DDoSSystem:
 
         print("\n==== END OF REPORT ====")
 
-    # ---------------------- REPORT  ----------------------
     def report_single_run(self):
         now = self.env.now
         self.web_server.update(now)
@@ -804,10 +768,6 @@ class DDoSSystem:
 
         print(f"Mitigation Discarded : {self.metrics.get('discarded_mitigation', 0)}")
 
-
-# ---------------------------------------------------------------------
-# Runner: single run / standard
-# ---------------------------------------------------------------------
 def run_simulation(scenario: str, mode: str, model: str, enable_windowing: bool,
                    arrival_p=None, arrival_l1=None, arrival_l2=None):
 
@@ -833,9 +793,6 @@ def run_simulation(scenario: str, mode: str, model: str, enable_windowing: bool,
         system.export_validation_row(scenario=scenario, out_csv_path=out_csv)
         print(f"[OK] Riga di validazione salvata in: {out_csv}")
 
-# ---------------------------------------------------------------------
-# Runner: verifica (exp distribuzioni)
-# ---------------------------------------------------------------------
 def run_verification(model: str,
                      enable_windowing: bool = True,
                      arrival_p: float = None,
@@ -858,12 +815,6 @@ def run_verification(model: str,
     if enable_windowing:
         system.report_windowing()
 
-
-
-
-# ---------------------------------------------------------------------
-# Runner: orizzonte finito / transitorio
-# ---------------------------------------------------------------------
 def run_finite_horizon(mode: str, scenario: str, out_csv: str, model: str = "baseline"):
     if os.path.exists(out_csv):
         os.remove(out_csv)
@@ -941,26 +892,13 @@ def run_finite_horizon(mode: str, scenario: str, out_csv: str, model: str = "bas
 
     return all_logs
 
-
-# ---------------------------------------------------------------------
-# Runner: orizzonte infinito (Analysis + fix CSV wide ≥64 righe)
-# ---------------------------------------------------------------------
 def run_infinite_horizon(mode: str,
                          out_csv: str,
                          out_acs: str,
                          burn_in: int = 0,
                          arrival_p=None, arrival_l1=None, arrival_l2=None,
                          model: str = "baseline"):
-    """
-    Esegue la simulazione a orizzonte infinito tramite il metodo dei Batch Means,
-    calcolando le autocorrelazioni (ACF) sulle metriche di interesse.
-
-    - Aggiunge al CSV wide anche le serie per-batch del centro Analysis (se presente):
-      'ana_rt', 'ana_util', 'ana_thr' (padding con NaN al bisogno).
-    - Usa K dinamico per l'ACF: K = min(50, n-1) dove n è la lunghezza utile (non-NaN)
-      più piccola tra le colonne selezionate, così si evita l'errore “length of data must be greater than K”.
-    - Normalizza il CSV wide per i grafici: 21 colonne richieste e ≥64 righe.
-    """
+    
     if mode not in ("verification", "standard"):
         raise ValueError("mode must be 'verification' or 'standard'")
 
@@ -983,18 +921,15 @@ def run_infinite_horizon(mode: str,
     )
     print(f"[OK] bm_series in {csv_path} ({k} righe). Colonne: {cols}")
 
-    # ---- Serie Analysis: append al CSV (se il centro esiste) ----
     ac = system.mitigation_manager.analysis_center
     if ac is not None:
         now = system.env.now
         ac.update(now)
 
-        # >>> CORRETTO: serie Analysis rate-based su finestra temporale
         ana_util_series, ana_thr_series = system._window_util_thr_analysis_rate_based(
             ac, TIME_WINDOW, now
         )
 
-        # Serie per-batch: RT (media su chunk consecutivi di B completamenti)
         rts = list(ac.completed_jobs)[burn_in:]
         n_batches_rt = len(rts) // BATCH_SIZE
         rt_series_ac = []
@@ -1003,7 +938,6 @@ def run_infinite_horizon(mode: str,
             if chunk:
                 rt_series_ac.append(float(np.mean(chunk)))
 
-        # Append/padding in CSV wide
         df = pd.read_csv(csv_path)
 
         def _pad(series, L):
@@ -1020,13 +954,10 @@ def run_infinite_horizon(mode: str,
 
         cols = [c for c in cols] + ["ana_rt", "ana_util", "ana_thr"]
 
-    # 👉 FIX per grafici: colonne richieste e almeno 64 righe
     _fix_wide_csv_on_disk(csv_path, min_rows=64)
 
-    # ---- Calcolo ACF con K dinamico (un unico K valido per tutte le colonne selezionate) ----
     df = pd.read_csv(csv_path)
 
-    # Considera solo colonne presenti con almeno 2 osservazioni
     cols = [c for c in cols if c in df.columns and df[c].notna().sum() >= 2]
     if not cols:
         print("[WARN] Nessuna colonna con almeno 2 punti per ACF. Salto il calcolo.")

@@ -59,11 +59,9 @@ def run_sim():
         variant = choose_variant()
         print(f"\nModello selezionato: {'MIGLIORATIVO' if variant=='ml_analysis' else 'BASE'}")
 
-        # 2) Scelta modalità
         mode = choose_mode()
         print(f"Modalità selezionata: {mode.upper()}")
 
-        # 3) Seeding
         if mode == "verification":
             plantSeeds(RNG_SEED_VERIFICATION)
         else:
@@ -74,14 +72,12 @@ def run_sim():
         else:
             model = 'ml_analysis'
 
-        # 4) Esecuzione
         if mode == "verification":
             run_verification(model, enable_windowing=True)
 
         elif mode == "standard":
             run_simulation("x40", "standard", model, enable_windowing=True,
                            arrival_p=ARRIVAL_P, arrival_l1=ARRIVAL_L1_x40, arrival_l2=ARRIVAL_L2_x40)
-            # run_simulation("x1", "standard", model, enable_windowing=True)
 
         elif mode == "single":
             run_simulation("x1", "standard", model, enable_windowing=False)

@@ -1,9 +1,7 @@
-
 import os, sys, csv, math
 from typing import List, Dict, Any
 import numpy as np
 import matplotlib.pyplot as plt
-
 
 def read_csv(path: str) -> List[Dict[str, Any]]:
     rows = []
@@ -14,7 +12,6 @@ def read_csv(path: str) -> List[Dict[str, Any]]:
     if not rows:
         raise RuntimeError("CSV vuoto.")
     return rows
-
 
 def to_float(x: Any, default=np.nan) -> float:
     try:
@@ -29,12 +26,10 @@ def to_float(x: Any, default=np.nan) -> float:
 
 
 def compute_lambda(p: float, l1: float, l2: float) -> float:
-    # Iperesponenziale 2 rami: E[T] = p*(1/l1) + (1-p)*(1/l2)  ->  λ = 1/E[T]
     if l1 <= 0 or l2 <= 0:
         return np.nan
     et = p * (1.0 / l1) + (1.0 - p) * (1.0 / l2)
     return 1.0 / et if et > 0 else np.nan
-
 
 def sort_by_lambda(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for row in rows:
@@ -44,14 +39,11 @@ def sort_by_lambda(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         row["_lambda"] = compute_lambda(p, l1, l2)
     return sorted(rows, key=lambda r: (math.isnan(r["_lambda"]), r["_lambda"]))
 
-
 def ensure_dir(d: str):
     if not os.path.isdir(d):
         os.makedirs(d, exist_ok=True)
 
-
 def plot_series(x, y_mean, xlab, ylab, title, outpath, y_ci=None):
-    """Se y_ci è disponibile (non tutto NaN), usa errorbar; altrimenti linea semplice."""
     plt.figure()
     if y_ci is not None and np.isfinite(y_ci).sum() >= 2:
         plt.errorbar(x, y_mean, yerr=y_ci, fmt='o-', capsize=3)
@@ -65,10 +57,9 @@ def plot_series(x, y_mean, xlab, ylab, title, outpath, y_ci=None):
     plt.savefig(outpath, dpi=150)
     plt.close()
 
-
 def main():
     if len(sys.argv) < 2:
-        print("Uso: python3 plot_validation.py validation_results.csv")
+        print("Usage: python3 plot_validation.py validation_results.csv")
         sys.exit(1)
 
     rows = sort_by_lambda(read_csv(sys.argv[1]))
@@ -78,7 +69,6 @@ def main():
     def col(name: str):
         return np.array([to_float(r.get(name)) for r in rows], dtype=float)
 
-    # --- Colonne base ---
     total_time = col("total_time")
     total_arrivals = col("total_arrivals")
 
@@ -88,7 +78,6 @@ def main():
 
     drop_fp = col("drop_fp_rate");  drop_full = col("drop_full_rate")
 
-    # --- Colonne Batch Means (se presenti nel CSV della validazione) ---
     web_util_bm_m = col("web_util_bm_mean"); web_util_bm_ci = col("web_util_bm_ci")
     web_rt_bm_m   = col("web_rt_bm_mean");   web_rt_bm_ci   = col("web_rt_bm_ci")
     web_thr_bm_m  = col("web_thr_bm_mean");  web_thr_bm_ci  = col("web_thr_bm_ci")
@@ -101,17 +90,14 @@ def main():
     mit_rt_bm_m   = col("mit_rt_bm_mean");   mit_rt_bm_ci   = col("mit_rt_bm_ci")
     mit_thr_bm_m  = col("mit_thr_bm_mean");  mit_thr_bm_ci  = col("mit_thr_bm_ci")
 
-    # helper: usa BM se hai almeno 2 punti finiti; altrimenti fallback
     def choose(mean_bm, ci_bm, mean_plain):
         if np.isfinite(mean_bm).sum() >= 2:
             return mean_bm, ci_bm
         return mean_plain, None
 
-    # λ_sim misurato: arrivi / tempo
     with np.errstate(divide='ignore', invalid='ignore'):
         lam_sim = np.where(total_time > 0, total_arrivals / total_time, np.nan)
 
-    # --- Derivate globali ---
     X_tot = web_thr + spk_thr
     with np.errstate(divide='ignore', invalid='ignore'):
         quota_web_global = np.where(X_tot > 0, web_thr / X_tot, np.nan)
@@ -119,14 +105,13 @@ def main():
         efficiency_exp  = np.where(lam_sim > 0, 1.0 - (drop_fp + drop_full) / lam_sim, np.nan)
         mu_hat_web_plain = np.where(web_util > 0, web_thr / web_util, np.nan)
 
-    # --- Derivate BM (preferite) ---
     X_tot_bm_m  = web_thr_bm_m + spk_thr_bm_m
-    # CI conservativo (upper bound): somma dei CI di Web e Spike
     X_tot_bm_ci = np.where(
         np.isfinite(web_thr_bm_ci) & np.isfinite(spk_thr_bm_ci),
         web_thr_bm_ci + spk_thr_bm_ci,
         np.nan
     )
+
     with np.errstate(divide='ignore', invalid='ignore'):
         quota_web_bm = np.where(
             (web_thr_bm_m + spk_thr_bm_m) > 0,
@@ -138,7 +123,6 @@ def main():
     outdir = "validation"
     ensure_dir(outdir)
 
-    # 1) Utilization
     y, yci = choose(web_util_bm_m, web_util_bm_ci, web_util)
     plot_series(lam_theory, y, "λ (jobs/s)", "Utilization", "Web Utilization vs λ",
                 os.path.join(outdir, "web_util_vs_lambda.png"), y_ci=yci)
@@ -151,7 +135,6 @@ def main():
     plot_series(lam_theory, y, "λ (jobs/s)", "Utilization", "Mitigation Utilization vs λ",
                 os.path.join(outdir, "mitigation_util_vs_lambda.png"), y_ci=yci)
 
-    # 2) Response Time
     y, yci = choose(web_rt_bm_m, web_rt_bm_ci, web_rt)
     plot_series(lam_theory, y, "λ (jobs/s)", "Response Time (s)", "Web Response Time vs λ",
                 os.path.join(outdir, "web_rt_vs_lambda.png"), y_ci=yci)
@@ -164,7 +147,6 @@ def main():
     plot_series(lam_theory, y, "λ (jobs/s)", "Response Time (s)", "Mitigation Response Time vs λ",
                 os.path.join(outdir, "mitigation_rt_vs_lambda.png"), y_ci=yci)
 
-    # 3) Throughput per centro
     y, yci = choose(web_thr_bm_m, web_thr_bm_ci, web_thr)
     plot_series(lam_theory, y, "λ (jobs/s)", "Throughput (jobs/s)", "Web Throughput vs λ",
                 os.path.join(outdir, "web_thr_vs_lambda.png"), y_ci=yci)
@@ -177,7 +159,6 @@ def main():
     plot_series(lam_theory, y, "λ (jobs/s)", "Throughput (jobs/s)", "Mitigation Throughput vs λ",
                 os.path.join(outdir, "mitigation_thr_vs_lambda.png"), y_ci=yci)
 
-    # 3b) Total Throughput
     if np.isfinite(X_tot_bm_m).sum() >= 2:
         plot_series(lam_theory, X_tot_bm_m, "λ (jobs/s)", "Throughput totale (jobs/s)",
                     "Total Throughput vs λ",

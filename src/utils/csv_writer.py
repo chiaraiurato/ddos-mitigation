@@ -35,13 +35,8 @@ def append_row(csv_path: str, row: dict):
 
 
 def append_row_stable(path: str, row: dict, fieldnames: list):
-    """
-    Scrive una riga su CSV usando fieldnames stabili.
-    - Se il file non esiste, scrive l'header.
-    - Filtra le chiavi extra e riempie i missing con "".
-    """
+    
     exists = os.path.exists(path)
-    # Prepara la riga allineata alle fieldnames
     safe_row = {k: row.get(k, "") for k in fieldnames}
     with open(path, "a", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
@@ -51,37 +46,25 @@ def append_row_stable(path: str, row: dict, fieldnames: list):
 
 def validation_fieldnames():
     return [
-        # scenario & input
         "scenario", "ARRIVAL_P", "ARRIVAL_L1", "ARRIVAL_L2",
-        # tempo & conteggi
         "total_time", "total_arrivals",
-        # --- Web 
         "web_util", "web_rt_mean", "web_throughput",
-        # --- Spike-0 
         "spikes_count", "spike0_util", "spike0_rt_mean", "spike0_throughput",
-        # --- Mitigation 
         "mit_util", "mit_rt_mean", "mit_throughput",
-        # --- Drop rates (per secondo)
         "drop_fp_rate", "drop_full_rate",
-        # --- Web (BM)
         "web_util_bm_mean", "web_util_bm_ci",
         "web_thr_bm_mean",  "web_thr_bm_ci",
         "web_rt_bm_mean",   "web_rt_bm_ci",
-        # --- Spike-0 (BM)
         "spike0_util_bm_mean", "spike0_util_bm_ci",
         "spike0_thr_bm_mean",  "spike0_thr_bm_ci",
         "spike0_rt_bm_mean",   "spike0_rt_bm_ci",
-        # --- Mitigation (BM)
         "mit_util_bm_mean", "mit_util_bm_ci",
         "mit_thr_bm_mean",  "mit_thr_bm_ci",
         "mit_rt_bm_mean",   "mit_rt_bm_ci",
-        # --- Analysis ML 
         "analysis_util", "analysis_rt_mean", "analysis_throughput",
-        # --- Analysis ML (BM)
         "ana_util_bm_mean", "ana_util_bm_ci",
         "ana_thr_bm_mean",  "ana_thr_bm_ci",
         "ana_rt_bm_mean",   "ana_rt_bm_ci",
-        # --- Parametri BM usati
         "bm_rt_batch_size", "bm_win_size", "bm_windows_per_batch"
     ]
 

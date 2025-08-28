@@ -8,7 +8,7 @@ class ProcessorSharingServer:
         self.name = name
         self.jobs = []
         self.proc = None
-        self.completed_jobs = []  # response times
+        self.completed_jobs = []  
         self.total_completions = 0
         self.legal_completions = 0
         self.illegal_completions = 0
@@ -17,16 +17,14 @@ class ProcessorSharingServer:
         self.area = 0.0
         self.busy_time = 0.0
 
-        # timeline cumulativa del tempo busy
         self._busy_cum_times = [0.0]
         self._busy_cum_values = [0.0]
 
-        self.completed_jobs = []           # response times "locali" (nel centro)
-        self.global_completed_jobs = []    # NEW: response times "globali" (incl. mitigazione)
+        self.completed_jobs = []           
+        self.global_completed_jobs = []    
 
-        self.completion_times = []  # absolute times
+        self.completion_times = []  
 
-        # NEW: periodi busy per window stats unificati
         self.busy_periods = []
 
     def set_observer(self, observer):
@@ -66,9 +64,7 @@ class ProcessorSharingServer:
         now = self.env.now
         self.update(now)
 
-        # se si passa da 0 a 1 job, inizia un periodo busy
         if len(self.jobs) == 0:
-            # apre intervallo busy
             self.busy_periods.append([now, None])
 
         self.jobs.append(job)
@@ -98,12 +94,11 @@ class ProcessorSharingServer:
 
         if job in self.jobs:
             self.jobs.remove(job)
-            response_time = now - job.arrival      # RT locale centro
-            # NEW: RT globale = dal primo ingresso nel sistema
+            response_time = now - job.arrival
             global_rt = now - getattr(job, "sys_arrival", job.arrival)
 
             self.completed_jobs.append(response_time)
-            self.global_completed_jobs.append(global_rt)   # NEW
+            self.global_completed_jobs.append(global_rt)
             self.completion_times.append(now)
             self.total_completions += 1
 
@@ -115,9 +110,7 @@ class ProcessorSharingServer:
             else:
                 self.illegal_completions += 1
 
-            # se ora non ci sono più job, chiudi il periodo busy corrente
             if len(self.jobs) == 0:
-                # trova l'ultimo intervallo aperto e chiudilo
                 if self.busy_periods and self.busy_periods[-1][1] is None:
                     self.busy_periods[-1][1] = now
 
@@ -128,7 +121,6 @@ class ProcessorSharingServer:
         yield self.env.timeout(0)
         self.schedule_completion()
 
-    # (facoltativo: puoi tenere questo metodo, ma non lo useremo più dal report)
     def get_batch_samples(self, time_window, simulation_time):
         utilization_samples = []
         throughput_samples = []

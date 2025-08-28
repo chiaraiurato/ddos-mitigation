@@ -2,15 +2,13 @@ import numpy as np
 from src.library.rngs import random 
 from src.library.rvgs import Exponential
 
-# Parametri realistici (Cloudflare-like)
-INTERARRIVAL_MEAN = 0.00002   # 50 000 rps
-SERVICE_MEAN = 0.00002  # 20 μs → μ = 50 000 req/s
-P_FEEDBACK = 0.02             # 2% probabilità di incertezza (feedback)
+INTERARRIVAL_MEAN = 0.00002   
+SERVICE_MEAN = 0.00002  
+P_FEEDBACK = 0.02       
 
-# Parametri batch means
-BATCH_SIZE = 1.0              # tempo di simulazione per batch (in secondi)
+BATCH_SIZE = 1.0              
 N_BATCHES = 300
-CONF_LEVEL = 1.96             # 95% confidence level
+CONF_LEVEL = 1.96            
 
 def exponential(mean):
     return Exponential(1.0 / mean)
@@ -56,7 +54,6 @@ def simulate_batch(batch_time):
         departure = arrival + wait
         stats.update(delay, wait, service)
 
-        # Feedback: reinserimento con nuova arrival se incertezza
         if random.random() < P_FEEDBACK and departure < batch_time:
             new_interarrival = exponential(INTERARRIVAL_MEAN)
             new_service = exponential(SERVICE_MEAN)

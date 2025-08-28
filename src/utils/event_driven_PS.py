@@ -2,7 +2,6 @@ import simpy
 import numpy as np
 import random
 
-# Parameters
 SI_MAX = 20
 ARRIVAL_P = 0.03033
 ARRIVAL_L1 = 0.4044
@@ -60,7 +59,6 @@ class DualPoolPS:
             service_time = hyperexp(SERVICE_P, SERVICE_L1, SERVICE_L2)
             job = Job(now, service_time)
 
-            # Decisione istantanea basata sulla lunghezza attuale
             if len(self.web_jobs) < SI_MAX:
                 self.web_jobs.append(job)
                 self.schedule_completion(self.web_jobs, 'web')

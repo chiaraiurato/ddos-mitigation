@@ -25,16 +25,10 @@ def _compute_batch_means(data, batch_size, burn_in=0, k_max=None, estimate_ci=Fa
     return means, k
 
 def make_batch_means_series(data, b, burn_in=0, k_max=None):
-    """
-    Crea una serie temporale di batch means dai dati forniti.
-    """
     means, _ = _compute_batch_means(data, b, burn_in=burn_in, k_max=k_max, estimate_ci=False)
     return means
 
 def batch_means(data, batch_size=None, n_batches=None, confidence=None, burn_in=0):
-    """
-    Calcola l'intervallo di confidenza per il batch means.
-    """
     if batch_size is None: batch_size = BATCH_SIZE
     if n_batches  is None: n_batches  = N_BATCH
     if confidence is None: confidence = CONFIDENCE_LEVEL
@@ -78,18 +72,9 @@ def window_util_thr(busy_periods, completion_times, window, now):
 
 
 def export_bm_series_to_wide_csv(system, B, out_csv, burn_in=0, k_max=None):
-    """
-    Crea un CSV 'wide' con colonne per CENTRO:
-      - RT batch means: web_rt, spike{i}_rt, mit_rt (NO system_rt)
-      - Util/Thr per batch: web_util, web_thr, spike{i}_util, spike{i}_thr, mit_util, mit_thr
-
-    Le metriche con n_eff < B vengono SKIPPATE (solo log).
-    Ritorna: (path_csv, lista_colonne, k_batch_comuni)
-    """
     os.makedirs(os.path.dirname(out_csv) or ".", exist_ok=True)
     center = system.mitigation_manager.center
 
-    # Serie per-job RT
     series_map = {
         "web_rt": list(system.web_server.completed_jobs),
         "mit_rt": list(center.completed_jobs),
@@ -100,7 +85,6 @@ def export_bm_series_to_wide_csv(system, B, out_csv, burn_in=0, k_max=None):
     def n_eff(seq): 
         return max(0, len(seq) - burn_in)
 
-    # --- Calcolo RT batch-means, skippando serie corte
     skipped = []
     bm_dict = {}
 
@@ -115,7 +99,6 @@ def export_bm_series_to_wide_csv(system, B, out_csv, burn_in=0, k_max=None):
         for n, m in skipped:
             print(f"  - {n}: n_eff={m} < B={B}")
 
-    # --- Util/Thr per batch (richiede n_eff >= B)
     now = system.env.now
     def add_util_thr(prefix, busy_periods, comp_times):
         if (len(comp_times) - burn_in) >= B:
@@ -133,14 +116,11 @@ def export_bm_series_to_wide_csv(system, B, out_csv, burn_in=0, k_max=None):
     if not bm_dict:
         raise ValueError("Nessuna colonna esportabile: tutti i centri sono sotto B.")
 
-    # --- Allineamento alla lunghezza minima
     k_common = min(len(v) for v in bm_dict.values())
 
-    # --- Lunghezze per colonna
     lengths = {c: len(bm_dict[c]) for c in bm_dict.keys()}
     k_rows = max(lengths.values()) 
 
-    # --- Ordine colonne: Web, Spike-*, Mitigation
     ordered = []
     if "web_rt" in bm_dict:   ordered.append("web_rt")
     if "web_util" in bm_dict: ordered += ["web_util", "web_thr"]
@@ -159,7 +139,6 @@ def export_bm_series_to_wide_csv(system, B, out_csv, burn_in=0, k_max=None):
     if "mit_rt" in bm_dict:   ordered.append("mit_rt")
     if "mit_util" in bm_dict: ordered += ["mit_util", "mit_thr"]
 
-    # --- Padding con NaN alla massima lunghezza
     def _pad_to(arr, L):
         a = np.asarray(arr, dtype=float)
         if a.size < L:
@@ -169,17 +148,11 @@ def export_bm_series_to_wide_csv(system, B, out_csv, burn_in=0, k_max=None):
 
     data = {c: _pad_to(bm_dict[c], k_rows) for c in ordered}
 
-    # --- Scrivi CSV
     df = pd.DataFrame(data)
     df.to_csv(out_csv, index=False)
     return out_csv, ordered, k_rows
 
-
 def calculate_autocorrelation(data, K_LAG=50):
-    """
-    Calcola l'autocorrelazione fino a K_LAG (come indicato dalla libreria acs.py).
-    Ritorna: mean, stdev, autocorr(list di length K_LAG), n
-    """
     SIZE = K_LAG + 1
     x = np.asarray(data, dtype=float)
     n = int(x.size)
@@ -246,12 +219,6 @@ def _closed_periods(periods, tmax):
     return out
 
 def util_thr_per_batch(busy_periods, completion_times, B, burn_in=0, k_max=None, tmax=None):
-    """
-    Per un dato CENTRO:
-      - throughput_batch = B / Δt, con Δt = [1°..ultimo] completion del batch di quel centro
-      - utilization_batch = busy_overlap(Δt) / Δt, usando busy_periods del centro
-    Ritorna (util_series, thr_series) allineati per batch.
-    """
     intervals = _batch_intervals_from_completions(completion_times, B, burn_in=burn_in, k_max=k_max)
     if tmax is None:
         tmax = intervals[-1, 1]
@@ -271,21 +238,9 @@ def util_thr_per_batch(busy_periods, completion_times, B, burn_in=0, k_max=None,
     return np.asarray(util), np.asarray(thr)
 
 
-def print_autocorrelation(file_path,
-                          columns=None,
-                          K_LAG=50,
-                          threshold=0.2,
-                          save_csv=None):
-    """
-    Legge un CSV wide, calcola ACF fino a K_LAG per ciascuna colonna.
-    - columns: lista di colonne da analizzare (default: tutte numeriche)
-    - threshold: stampa PASS/FAIL su rho_1 < threshold
-    - save_csv: se non None, salva un CSV con mean/stdev/rho_1..rho_K
-    Ritorna: DataFrame con risultati
-    """
+def print_autocorrelation(file_path, columns=None, K_LAG=50, threshold=0.2, save_csv=None):
     df = pd.read_csv(file_path)
     if columns is None:
-        # solo colonne numeriche
         columns = [c for c in df.columns if np.issubdtype(df[c].dropna().dtype, np.number)]
 
     results = []
@@ -313,5 +268,3 @@ def print_autocorrelation(file_path,
         os.makedirs(os.path.dirname(save_csv) or ".", exist_ok=True)
         out.to_csv(save_csv, index=False)
     return out
-
-

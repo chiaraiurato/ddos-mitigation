@@ -1,4 +1,3 @@
-# markov_ddos_ml.py
 import numpy as np
 import scipy.sparse as sp
 from scipy.sparse.linalg import spsolve
@@ -6,47 +5,30 @@ import time
 
 
 class DDoSMarkovChain:
-    """
-    Variante MIGLIORATIVA con centro di ANALISI (M/M/c/c, NO coda).
-    Stato: (i, a, w, s)
-      i = jobs in Mitigation       ∈ [0..K_mit]
-      a = jobs in Analysis (ML)    ∈ [0..K_ana]
-      w = jobs in Web (PS)         ∈ [0..K_web]
-      s = jobs in Spike (PS)       ∈ [0..K_spi]
-    """
 
     def __init__(self):
-        # ---- Parametri di base (unità: 1/s) ----
-        self.lambda_arrival = 6.666666  # arrivi al sistema
-        self.mu_mitigation  = 909.0     # PS totale del Mitigation (M/M/1/K)
+        self.lambda_arrival = 6.666666  
+        self.mu_mitigation  = 909.0     
+        self.mu_web   = 6.25            
+        self.mu_spike = 6.25            
 
-        self.mu_web   = 6.25            # PS (totale) del Web
-        self.mu_spike = 6.25            # PS (totale) dello Spike
-
-        # ---- Analysis Center (M/M/c/c) ----
-        self.c_ana        = 4                  # # core
-        self.mu_ana_core  = 407.4425           # tasso per-core
-        # NB: tasso istantaneo totale = mu_ana_core * min(a, c_ana)
-
-        # ---- Capacità ----
+        self.c_ana        = 4                  
+        self.mu_ana_core  = 407.4425           
+        
         self.K_mitigation = 4
-        self.K_analysis   = self.c_ana         # sistema a perdita, capacità = #core
+        self.K_analysis   = self.c_ana
         self.K_web        = 20
         self.K_spike      = 20
 
-        # ---- Probabilità mix e classificatore ----
-        self.p_fp       = 0.01                 # false positive al Mitigation
+        self.p_fp       = 0.01
 
-        # Probabilità di drop per classificazione ML (media sul mix)
         self.p_drop_ml = 0.89504
         self.p_pass_ml = 1.0 - self.p_drop_ml
 
-        # ---- Stato / mapping ----
         self.states = []
         self.state_to_index = {}
         self._build_state_space()
 
-    # -------------------- Stato --------------------
     def _build_state_space(self):
         idx = 0
         for i in range(self.K_mitigation + 1):
@@ -60,100 +42,72 @@ class DDoSMarkovChain:
         print(f"Spazio degli stati costruito: {len(self.states)} stati (dim: "
               f"{self.K_mitigation+1}×{self.K_analysis+1}×{self.K_web+1}×{self.K_spike+1})")
 
-    # -------------------- Tassi di transizione --------------------
     def _rate_mit_depart(self, i):
-        """Mitigation: PS M/M/1 → tasso totale = mu_mitigation se i>0, altrimenti 0."""
         return self.mu_mitigation if i > 0 else 0.0
 
     def _rate_ana_depart(self, a):
-        """Analysis: M/M/c/c → tasso totale = mu_ana_core * min(a, c)."""
         return self.mu_ana_core * min(a, self.c_ana)
 
     def _rate_web_depart(self, w):
-        """Web: PS → tasso totale = mu_web se w>0, altrimenti 0."""
         return self.mu_web if w > 0 else 0.0
 
     def _rate_spi_depart(self, s):
-        """Spike: PS → tasso totale = mu_spike se s>0, altrimenti 0."""
         return self.mu_spike if s > 0 else 0.0
 
     def _get_transition_rate(self, st_from, st_to):
         i, a, w, s = st_from
         i2, a2, w2, s2 = st_to
 
-        # 1) ARRIVI al Mitigation (se non pieno)
         if (i2 == i + 1) and (a2 == a) and (w2 == w) and (s2 == s):
             if i < self.K_mitigation:
                 return self.lambda_arrival
             return 0.0
 
-        # 2) COMPLETAMENTI al Mitigation → FP / Analysis (se cap) / drop per Analysis piena
         if (i2 == i - 1) and (a2 in (a, a + 1)) and (w2 == w) and (s2 == s) and (i > 0):
             dep = self._rate_mit_depart(i)
             if dep == 0.0:
                 return 0.0
 
-            # a) Drop per falso positivo (rimane a, w, s invariati)
             if a2 == a:
-                # due casi si “accavallano”: FP o cap Analysis piena.
-                # Distinguiamoli con le condizioni.
-                # - FP: sempre possibile
-                # - Analisi piena: SOLO se a == K_analysis e non FP
-                # Prima, FP:
-                # Nota: questa transizione compete con la “drop per cap Analysis piena”,
-                #       che modelliamo sotto con stessa (i2==i-1, a2==a).
-                # Qui ritorniamo SOLO la parte FP.
                 return dep * self.p_fp
 
-            # b) Forward a Analysis (se non piena): i→i-1, a→a+1
             if (a2 == a + 1) and (a < self.K_analysis):
                 return dep * (1.0 - self.p_fp)
 
-            # c) Drop per Analysis piena (non FP): i→i-1 (a invariato) se a==K_analysis
             if (a2 == a) and (a == self.K_analysis):
                 return dep * (1.0 - self.p_fp)
 
             return 0.0
 
-        # 3) COMPLETAMENTI in Analysis → ML drop / Web / Spike / drop per downstream full
         if (i2 == i) and (a2 in (a - 1, a)) and (w2 in (w, w + 1)) and (s2 in (s, s + 1)) and (a > 0):
             dep = self._rate_ana_depart(a)
             if dep == 0.0:
                 return 0.0
 
-            # Esiti alla partenza da Analysis:
-            # - Drop per ML: a→a-1 (w,s invariati)
             if (a2 == a - 1) and (w2 == w) and (s2 == s):
                 return dep * self.p_drop_ml
 
-            # - Forward (p_pass_ml) verso Web/Spike se non pieni, altrimenti drop per full
             fwd = dep * self.p_pass_ml
 
-            # → Web se w<K_web
             if (a2 == a - 1) and (w2 == w + 1) and (s2 == s) and (w < self.K_web):
                 return fwd
 
-            # → Spike se Web pieno e s<K_spike
             if (a2 == a - 1) and (w2 == w) and (s2 == s + 1) and (w >= self.K_web) and (s < self.K_spike):
                 return fwd
 
-            # → Drop per downstream full (Web e Spike pieni): a→a-1, w,s invariati
             if (a2 == a - 1) and (w2 == w) and (s2 == s) and (w >= self.K_web) and (s >= self.K_spike):
                 return fwd
 
             return 0.0
 
-        # 4) COMPLETAMENTI Web (PS): w→w-1
         if (i2 == i) and (a2 == a) and (w2 == w - 1) and (s2 == s) and (w > 0):
             return self._rate_web_depart(w)
 
-        # 5) COMPLETAMENTI Spike (PS): s→s-1
         if (i2 == i) and (a2 == a) and (w2 == w) and (s2 == s - 1) and (s > 0):
             return self._rate_spi_depart(s)
 
         return 0.0
 
-    # -------------------- Generatrice & Steady State --------------------
     def build_generator_matrix(self):
         n = len(self.states)
         print(f"Costruzione matrice generatrice Q ({n}×{n})...")
@@ -187,7 +141,6 @@ class DDoSMarkovChain:
     def calculate_metrics(self, pi):
         print("Calcolo metriche di performance...")
 
-        # ---- accumulatori ----
         util_mit = util_web = util_spi = 0.0
         avg_i = avg_a = avg_w = avg_s = 0.0
 
@@ -195,10 +148,9 @@ class DDoSMarkovChain:
 
         p_mit_full = 0.0
         p_ana_full = 0.0
-        p_ana_nonempty = 0.0          # P{A>0}
-        e_busy_ana = 0.0              # E[min(A,c)] = #core medi occupati
+        p_ana_nonempty = 0.0          
+        e_busy_ana = 0.0              
 
-        # routing
         rate_mit_to_ana   = 0.0
         rate_mit_drop_fp  = 0.0
         rate_mit_drop_cap = 0.0
@@ -215,38 +167,30 @@ class DDoSMarkovChain:
             if a == self.K_analysis:   p_ana_full += p
             if a > 0:                  p_ana_nonempty += p
 
-            # --- Utilizzazioni stile-PS ---
             if i > 0: util_mit += p
             if w > 0: util_web += p
             if s > 0: util_spi += p
 
-            # --- E[min(A,c)] per il centro Analysis (multi-core) ---
             e_busy_ana += p * min(a, self.c_ana)
 
-            # --- N medi ---
             avg_i += p * i
             avg_a += p * a
             avg_w += p * w
             avg_s += p * s
 
-            # --- Throughput istantanei ---
             if i > 0: thr_mit += p * self.mu_mitigation
             if w > 0: thr_web += p * self.mu_web
             if s > 0: thr_spi += p * self.mu_spike
             thr_ana += p * (self.mu_ana_core * min(a, self.c_ana))
 
-            # --- Routing / drop al Mitigation ---
             if i > 0:
                 dep = p * self.mu_mitigation
-                # FP
                 rate_mit_drop_fp  += dep * self.p_fp
-                # non-FP → Analysis se non pieno, altrimenti drop per cap
                 if a < self.K_analysis:
                     rate_mit_to_ana += dep * (1.0 - self.p_fp)
                 else:
                     rate_mit_drop_cap += dep * (1.0 - self.p_fp)
 
-            # --- Routing / drop all'Analysis ---
             if a > 0:
                 dep_ana = p * (self.mu_ana_core * min(a, self.c_ana))
                 rate_ana_drop_ml += dep_ana * self.p_drop_ml
@@ -258,12 +202,9 @@ class DDoSMarkovChain:
                 else:
                     rate_ana_drop_full += fwd
 
-        # ---- grandezze derivate ----
-        util_ana_per_core = e_busy_ana / (self.c_ana)        # E[min(A,c)]/c
-        # per confronto: thr_ana_expected = mu_core * E[min(A,c)]
+        util_ana_per_core = e_busy_ana / (self.c_ana)        
         thr_ana_expected = self.mu_ana_core * e_busy_ana
 
-        # tempi di risposta (Little): T = N / throughput
         rt_mit = (avg_i / thr_mit) if thr_mit > 0 else 0.0
         rt_ana = (avg_a / thr_ana) if thr_ana > 0 else 0.0
         rt_web = (avg_w / thr_web) if thr_web > 0 else 0.0
@@ -271,7 +212,6 @@ class DDoSMarkovChain:
 
         lambda_eff = self.lambda_arrival * (1.0 - p_mit_full)
 
-        # Prob condizionate ai completamenti
         mit_dep = thr_mit
         ana_dep = thr_ana
 
@@ -286,12 +226,12 @@ class DDoSMarkovChain:
 
         return {
             "utilizations": {
-                "mitigation": util_mit,                   # = P{I>0}
-                "analysis_per_core": util_ana_per_core,   # = E[min(A,c)]/c
-                "analysis_nonempty": p_ana_nonempty,      # = P{A>0}
-                "web": util_web,                          # = P{W>0}
-                "spike": util_spi,                        # = P{S>0}
-                "analysis_avg_busy_cores": e_busy_ana     # = E[min(A,c)]
+                "mitigation": util_mit,                   
+                "analysis_per_core": util_ana_per_core,   
+                "analysis_nonempty": p_ana_nonempty,      
+                "web": util_web,                          
+                "spike": util_spi,                        
+                "analysis_avg_busy_cores": e_busy_ana     
             },
             "avg_jobs": {
                 "mitigation": avg_i,
@@ -304,7 +244,7 @@ class DDoSMarkovChain:
                 "analysis":   thr_ana,
                 "web":        thr_web,
                 "spike":      thr_spi,
-                "analysis_expected": thr_ana_expected     # check: ≈ analysis
+                "analysis_expected": thr_ana_expected     
             },
             "response_times": {
                 "mitigation": rt_mit,
@@ -385,7 +325,6 @@ class DDoSMarkovChain:
         print(f"  Drop @ML(class)     : {m['rates']['drop_ml_class']:.6f} job/s")
         print(f"  Drop @downstream    : {m['rates']['drop_downstream']:.6f} job/s")
 
-        # --- Consistency checks utili ---
         thr_ana = m['throughput']['analysis']
         util_core = m['utilizations']['analysis_per_core']
         thr_ana_chk = self.mu_ana_core * self.c_ana * util_core

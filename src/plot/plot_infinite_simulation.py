@@ -1,10 +1,3 @@
-"""
-Generate 'infinite horizon' style plots from a CSV of batch-wise metrics.
-Overlays the overall mean (across all batches) as a dashed horizontal line.
-
-Usage:
-  python3 plot_infinite_simulation.py --csv results_infinite_bm.csv --out-dir infinite_horizon --dpi 150
-"""
 import argparse
 from pathlib import Path
 import pandas as pd
@@ -50,10 +43,8 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     df = pd.read_csv(csv_path)
-    # x-axis is the batch number (1..N)
     x = np.arange(1, len(df) + 1)
 
-    # Track missing and generated
     missing = []
     generated = []
 
@@ -66,8 +57,7 @@ def main():
         mean_val = float(np.nanmean(y)) if y.size else float("nan")
 
         plt.figure()
-        plt.plot(x, y)  # one chart per figure, do not set colors
-        # Overlay the overall mean as dashed horizontal line
+        plt.plot(x, y)
         plt.axhline(mean_val, linestyle="--")
         plt.xlabel("Batch #")
         plt.ylabel(metric_label(col))
@@ -80,7 +70,6 @@ def main():
 
         generated.append(str(out_file))
 
-    # Summary
     print(f"[OK] Generated {len(generated)} plots in: {out_dir}")
     if missing:
         print("[WARN] Missing columns in CSV: " + ", ".join(missing))

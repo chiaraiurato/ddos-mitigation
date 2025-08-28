@@ -1,12 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Grafici Analisi del Transitorio: spaghetti plot per scenario.
-- Per le metriche di utilizzazione mostra asse 0..1 con 3 decimali + headroom sopra 1.0
-- Crea anche un grafico "zoom" attorno ai valori osservati
-Salva i PNG in ./transitory/
-"""
-
 import argparse
 from pathlib import Path
 from typing import List, Optional
@@ -15,26 +6,18 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FormatStrFormatter
 
-# ==== SEEDS per le legende (scenario-i → SEEDS[i]) ====
 SEEDS = [123456789, 653476254, 734861870, 976578247, 364519872, 984307865, 546274352]
 
-# Colonne attese
 TIME_COL = "time"
 REP_COL  = "replica"
 
-# Metriche richieste (se mancano nel CSV vengono ignorate)
 METRICS = [
-    # Web
     "web_rt_mean", "web_util", "web_throughput",
-    # Spike-0 (aggiunte)
     "spike0_rt_mean", "spike0_util", "spike0_throughput",
-    # Mitigation
     "mit_rt_mean", "mit_util", "mit_throughput",
-    # Altre info utili
     "spikes_count",
 ]
 
-# ---------- helpers ----------
 def guess_available_metrics(df: pd.DataFrame, candidates: List[str]) -> List[str]:
     return [m for m in candidates if m in df.columns]
 
@@ -90,7 +73,6 @@ def build_label_map(df: pd.DataFrame, seeds: List[int]):
             label_map[r] = f"scenario-{r_int}"
     return label_map
 
-# ---------- plotting generico ----------
 def spaghetti_by_scenario(df: pd.DataFrame,
                           metric: str,
                           scale: float,
@@ -99,6 +81,7 @@ def spaghetti_by_scenario(df: pd.DataFrame,
                           label_map: dict,
                           round_time_decimals: Optional[int] = 0,
                           vline_sec: Optional[float] = None):
+
     d = df[[TIME_COL, REP_COL, metric]].dropna().copy()
     if d.empty:
         return None
@@ -118,9 +101,8 @@ def spaghetti_by_scenario(df: pd.DataFrame,
     if vline_sec is not None:
         plt.axvline(x=vline_sec * scale, linestyle="--")
 
-    # formato speciale per UTIL
     if metric.endswith("util"):
-        headroom = 1e-3  # ~0.1% di spazio sopra 1.0
+        headroom = 1e-3
         ymax_obs = float(d[metric].max())
         ax.set_ylim(0.0, max(1.0 + headroom, ymax_obs + headroom))
         ax.yaxis.set_major_formatter(FormatStrFormatter('%.3f'))
@@ -137,7 +119,6 @@ def spaghetti_by_scenario(df: pd.DataFrame,
     plt.close()
     return outpath
 
-# ---------- plotting zoom per UTIL ----------
 def spaghetti_util_zoom_by_scenario(df: pd.DataFrame,
                                     metric: str,
                                     scale: float,
@@ -146,6 +127,7 @@ def spaghetti_util_zoom_by_scenario(df: pd.DataFrame,
                                     label_map: dict,
                                     round_time_decimals: Optional[int] = 0,
                                     vline_sec: Optional[float] = None):
+
     d = df[[TIME_COL, REP_COL, metric]].dropna().copy()
     if d.empty:
         return None
@@ -158,9 +140,9 @@ def spaghetti_util_zoom_by_scenario(df: pd.DataFrame,
     ymax_obs = float(d[metric].max())
 
     spread = max(ymax_obs - ymin_obs, 1e-6)
-    delta  = max(3e-4, spread * 0.30)  # margine laterale verticale
+    delta  = max(3e-4, spread * 0.30)
     low  = max(0.0, ymin_obs - delta)
-    high = max(1.0 + 1e-3, ymax_obs + delta)  # lascia sempre un filo sopra 1.0
+    high = max(1.0 + 1e-3, ymax_obs + delta)
 
     plt.figure()
     ax = plt.gca()
@@ -188,7 +170,6 @@ def spaghetti_util_zoom_by_scenario(df: pd.DataFrame,
     plt.close()
     return outpath
 
-# ---------- main ----------
 def main():
     ap = argparse.ArgumentParser(description="Grafici Transitorio: spaghetti plot per scenario")
     ap.add_argument("--csv", type=str, default="results_transitory.csv", help="Percorso CSV checkpoint")
@@ -203,19 +184,15 @@ def main():
 
     df = pd.read_csv(csv_path)
 
-    # metriche disponibili
     metrics = guess_available_metrics(df, METRICS)
     if not metrics:
         raise ValueError(f"Nessuna metrica trovata tra {METRICS}. Colonne: {list(df.columns)}")
 
-    # unità tempo + arrotondamento
     scale, xlabel = time_scale_and_label(args.time_unit)
     round_time_decimals = None if args.round_time is not None and args.round_time < 0 else args.round_time
 
-    # mappa scenario/seed per la legenda
     label_map = build_label_map(df, SEEDS)
 
-    # genera plot
     for metric in metrics:
         spaghetti_by_scenario(df, metric, scale, xlabel, outdir, label_map,
                               round_time_decimals=round_time_decimals, vline_sec=args.vline)

@@ -6,12 +6,6 @@ from engineering.costants import (
 )
 
 class AnalysisCenter:
-    """
-    Centro di Analisi ML: M/M/c/c (NO coda)
-    - c = ANALYSIS_CORES
-    - servizio per-core ~ Exp(ANALYSIS_ES_CORE)
-    - on_complete(job, now) viene richiamato al termine
-    """
     def __init__(self, env, name, metrics, on_complete=None):
         self.env = env
         self.name = name
@@ -21,7 +15,6 @@ class AnalysisCenter:
         self.cores = ANALYSIS_CORES
         self.busy = 0
 
-        # statistiche
         self.core_busy_periods = [[] for _ in range(self.cores)]
         self.completed_jobs = []
         self.completion_times = []
@@ -33,7 +26,6 @@ class AnalysisCenter:
         return self.busy < self.cores
 
     def arrival(self, job):
-        """Ritorna False se pieno (drop per capacità)."""
         if not self.has_capacity():
             return False
 
@@ -49,14 +41,12 @@ class AnalysisCenter:
             yield self.env.timeout(svc)
             now = self.env.now
 
-            # chiudi periodo busy del core
             periods = self.core_busy_periods[core_id]
             if periods and periods[-1][1] is None:
                 periods[-1][1] = now
 
             self.busy -= 1
 
-            # metriche
             self.completed_jobs.append(now - job.arrival)  # RT locale al centro
             self.completion_times.append(now)
             self.total_completions += 1
@@ -65,7 +55,6 @@ class AnalysisCenter:
             else:
                 self.illegal_completions += 1
 
-            # callback al manager (classificazione ML + routing)
             if self.on_complete:
                 self.on_complete(job, now)
 
@@ -73,10 +62,8 @@ class AnalysisCenter:
         return True
 
     def update(self, now):
-        """Chiude periodi busy 'aperti' fino a now (per util/throughput a finestra)."""
         for core_id in range(self.cores):
             periods = self.core_busy_periods[core_id]
             if periods and periods[-1][1] is None:
                 periods[-1][1] = now
-                # riapri per continuità, se serve
                 periods.append([now, None])

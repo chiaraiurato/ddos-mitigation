@@ -4,8 +4,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 
-
-# -------------------- IO utils --------------------
 def read_csv(path: str) -> List[Dict[str, Any]]:
     rows = []
     with open(path, newline="") as f:
@@ -15,7 +13,6 @@ def read_csv(path: str) -> List[Dict[str, Any]]:
     if not rows:
         raise RuntimeError("CSV vuoto.")
     return rows
-
 
 def to_float(x: Any, default=np.nan) -> float:
     try:
@@ -28,15 +25,11 @@ def to_float(x: Any, default=np.nan) -> float:
     except Exception:
         return default
 
-
 def ensure_dir(d: str):
     if not os.path.isdir(d):
         os.makedirs(d, exist_ok=True)
 
-
-# -------------------- Plot helpers (categorical X) --------------------
 def plot_series_cat(labels, y, xlab, ylab, title, outpath):
-    """Linea spezzata su asse X categoriale (scenari). Niente error bar."""
     x = np.arange(len(labels), dtype=float)
     plt.figure()
     plt.plot(x, y, marker='o')
@@ -51,7 +44,6 @@ def plot_series_cat(labels, y, xlab, ylab, title, outpath):
 
 
 def plot_series_cat_int_y(labels, y, xlab, ylab, title, outpath):
-    """Linea spezzata ma con asse Y forzato a tick interi (per count spike)."""
     x = np.arange(len(labels), dtype=float)
     plt.figure()
     plt.plot(x, y, marker='o')
@@ -68,22 +60,15 @@ def plot_series_cat_int_y(labels, y, xlab, ylab, title, outpath):
 
 
 def choose_prefer_bm(mean_bm: np.ndarray, mean_point: np.ndarray) -> np.ndarray:
-    """
-    Se ho almeno 2 valori finiti nella serie BM, uso la media BM; altrimenti la point.
-    (Niente CI – sono state rimosse dai grafici.)
-    """
     return mean_bm if np.isfinite(mean_bm).sum() >= 2 else mean_point
 
-
-# -------------------- Main --------------------
 def main():
     if len(sys.argv) < 2:
-        print("Uso: python3 plot_validation_improved.py results_validation_ml_analysis.csv")
+        print("Usage: python3 plot_validation_improved.py results_validation_ml_analysis.csv")
         sys.exit(1)
 
     rows = read_csv(sys.argv[1])
 
-    # Ordina per scenario x1,x2,x5,x10,x40 (se diverso, mantiene l'ordine del file)
     def scen_key(s: str) -> float:
         s = (s or "").strip().lower()
         if s.startswith("x") and s[1:].isdigit():
@@ -97,7 +82,6 @@ def main():
     def col(name: str):
         return np.array([to_float(r.get(name)) for r in rows], dtype=float)
 
-    # --- Colonne base (point) ---
     total_time = col("total_time")
     total_arrivals = col("total_arrivals")
     spikes_count = col("spikes_count")
@@ -106,14 +90,12 @@ def main():
     spk0_util = col("spike0_util");       spk0_rt = col("spike0_rt_mean");       spk0_thr = col("spike0_throughput")
     mit_util = col("mit_util");           mit_rt = col("mit_rt_mean");           mit_thr = col("mit_throughput")
 
-    # Analysis ML (POINT): per richiesta, forziamo SEMPRE questi per i grafici
     ana_util_point = col("analysis_util")
-    ana_rt_point   = col("analysis_rt_mean")        # <<--- uso forzato di analysis_rt_mean
+    ana_rt_point   = col("analysis_rt_mean")
     ana_thr_point  = col("analysis_throughput")
 
     drop_fp = col("drop_fp_rate");  drop_full = col("drop_full_rate")
 
-    # --- Colonne BM (solo per scegliere la media se presente; niente CI) ---
     web_util_bm_m = col("web_util_bm_mean")
     web_rt_bm_m   = col("web_rt_bm_mean")
     web_thr_bm_m  = col("web_thr_bm_mean")
@@ -128,9 +110,7 @@ def main():
 
     ana_util_bm_m = col("ana_util_bm_mean")
     ana_thr_bm_m  = col("ana_thr_bm_mean")
-    # ana_rt_bm_m = col("ana_rt_bm_mean")  # NON usato di proposito (richiesta)
 
-    # helper: preferisci BM se disponibile (senza CI)
     web_util_used = choose_prefer_bm(web_util_bm_m, web_util)
     web_rt_used   = choose_prefer_bm(web_rt_bm_m,   web_rt)
     web_thr_used  = choose_prefer_bm(web_thr_bm_m,  web_thr)
@@ -143,12 +123,10 @@ def main():
     mit_rt_used   = choose_prefer_bm(mit_rt_bm_m,   mit_rt)
     mit_thr_used  = choose_prefer_bm(mit_thr_bm_m,  mit_thr)
 
-    # Analysis: util e thr posso preferire BM se ci sono; RT è forzato a point
     ana_util_used = choose_prefer_bm(ana_util_bm_m, ana_util_point)
     ana_thr_used  = choose_prefer_bm(ana_thr_bm_m,  ana_thr_point)
-    ana_rt_used   = ana_rt_point  # forzato
+    ana_rt_used   = ana_rt_point  
 
-    # Derivati utili (senza error bar)
     with np.errstate(divide='ignore', invalid='ignore'):
         lam_sim = np.where(total_time > 0, total_arrivals / total_time, np.nan)
         X_tot_web_spk0 = web_thr_used + spk0_thr_used
@@ -158,7 +136,6 @@ def main():
     outdir = "validation_improved"
     ensure_dir(outdir)
 
-    # 1) Utilization
     plot_series_cat(scenarios, web_util_used,  "Scenario", "Utilization",
                     "Web Utilization vs Scenario",
                     os.path.join(outdir, "web_util_vs_scenario.png"))
@@ -175,7 +152,6 @@ def main():
                     "Analysis ML Utilization vs Scenario",
                     os.path.join(outdir, "analysis_util_vs_scenario.png"))
 
-    # 2) Response Time
     plot_series_cat(scenarios, web_rt_used, "Scenario", "Response Time (s)",
                     "Web Response Time vs Scenario",
                     os.path.join(outdir, "web_rt_vs_scenario.png"))
@@ -188,12 +164,10 @@ def main():
                     "Mitigation Response Time vs Scenario",
                     os.path.join(outdir, "mitigation_rt_vs_scenario.png"))
 
-    # Analysis ML: RT forzato a analysis_rt_mean
     plot_series_cat(scenarios, ana_rt_used, "Scenario", "Response Time (s)",
                     "Analysis ML Response Time vs Scenario",
                     os.path.join(outdir, "analysis_rt_vs_scenario.png"))
 
-    # 3) Throughput
     plot_series_cat(scenarios, web_thr_used, "Scenario", "Throughput (jobs/s)",
                     "Web Throughput vs Scenario",
                     os.path.join(outdir, "web_thr_vs_scenario.png"))
@@ -210,19 +184,16 @@ def main():
         "Analysis ML Throughput vs Scenario",
         os.path.join(outdir, "analysis_thr_vs_scenario.png"))
 
-    # 3b) Total (Web + Spike-0)
     plot_series_cat(scenarios, X_tot_web_spk0, "Scenario", "Throughput (jobs/s)",
                     "Web+Spike-0 Throughput vs Scenario",
                     os.path.join(outdir, "web_spike0_total_throughput_vs_scenario.png"))
 
-    # 4) Spike count – linea spezzata (niente barre)
     plot_series_cat_int_y(
         scenarios, spikes_count, "Scenario", "# Spike allocati",
         "Spike allocati (linea) vs Scenario",
         os.path.join(outdir, "spikes_count_line_vs_scenario.png")
     )
 
-    # --------- Stampa tabellina riassuntiva ----------
     print("\nScenario\tspikes\tλ_sim\tX_web\tX_spk0\tX_web+spk0\tη_meas\tη_exp")
     for i in range(len(scenarios)):
         def f(z): return f"{z:.6f}" if np.isfinite(z) else "nan"
@@ -233,6 +204,6 @@ def main():
     print(f"\nGrafici generati nella cartella: {outdir}")
 
 
-#  Esempio:  python3 plot_validation_improved.py results_validation_ml_analysis.csv
+# python3 plot_validation_improved.py results_validation_ml_analysis.csv
 if __name__ == "__main__":
     main()
