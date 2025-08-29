@@ -6,7 +6,6 @@ spike0_rt: rho_1=0.196
 spike0_util: rho_1=0.000
 spike0_thr: rho_1=-0.334
 
-
 mit_rt: rho_1=-0.018  
 mit_util: rho_1=-0.017
 mit_thr: rho_1=-0.019 
@@ -31,5 +30,3 @@ mit_thr: rho_1=-0.021
 ana_rt: rho_1=-0.055  
 ana_util: rho_1=0.000 
 ana_thr: rho_1=0.049  
-
-
