@@ -96,17 +96,16 @@ class MitigationManager:
         selectStream(RNG_STREAM_ML_DECISION)
         u = random()
 
-        if job.is_legal:
-            if u < P_DROP_LEGAL:
+        if u < P_DROP_ML:
+            if job.is_legal:
                 self.metrics["ml_drop_legal"] += 1
-                return
             else:
+                self.metrics["ml_drop_illegal"] += 1
+            return
+        else:
+            if job.is_legal:
                 self.metrics["ml_pass_legal"] += 1
                 self._forward_to_service_tier(job, completion_time)
-                return
-        else:
-            if u < P_DROP_ILLEGAL:
-                self.metrics["ml_drop_illegal"] += 1
                 return
             else:
                 self.metrics["ml_pass_illegal"] += 1
