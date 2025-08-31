@@ -2,8 +2,8 @@ import sys
 from controller.simulation import run_simulation, run_finite_horizon, run_infinite_horizon, run_verification
 from engineering.costants import *
 from library.rngs import plantSeeds
-
-
+from engineering.statistics import print_autocorrelation
+import pandas as pd
 def choose_variant():
     print_banner()
     print("Scegli il MODELLO:")
@@ -48,6 +48,8 @@ def choose_mode():
         return "infinite simulation"
     elif choice == "7":
         sys.exit()
+    elif choice == "8":
+        return "print_corr"
     else:
         print("Scelta non valida. Default: standard.")
         return "standard"
@@ -106,12 +108,16 @@ def run_sim():
             
         elif mode == "infinite simulation":
             run_infinite_horizon(
-                mode="standard",
+                mode="infinite simulation",
                 out_csv="plot/results_infinite_bm_" + model + ".csv",
                 out_acs="acs_input/acs_input_ " + model + ".csv",
                 burn_in=BURN_IN,
                 model=model
             )
+        elif mode == "print_corr":
+            csv_path = "/home/aries/Documenti/PMCSN_2/ddos-mitigation/src/plot/results_infinite_bm_ml_analysis.csv"
+            print_autocorrelation(csv_path, columns=None, save_csv=None)
+
 def print_banner():
     print(r"""
 ██████╗ ██████╗  ██████╗ ███████╗    ███╗   ███╗██╗████████╗██╗ ██████╗  █████╗ ████████╗██╗ ██████╗ ███╗   ██╗

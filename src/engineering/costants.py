@@ -1,7 +1,8 @@
 # Batch Means Parameters
-#BATCH_SIZE          = 1256         # Base
-BATCH_SIZE          = 1500         # Improved
+BATCH_SIZE          = 1256         # Base
+BATCH_SIZE_IMPROVED = 1500         # Improved
 N_BATCH             = 64
+N_BATCH_IMPROVED    = 128
 CONFIDENCE_LEVEL    = 0.95
 BURN_IN             = 1000
 
@@ -94,7 +95,7 @@ STOP_CONDITION_FINITE_SIMULATION        = 18000  # 5 hours
 
 # --- Model variant toggle ---
 MODEL_VARIANT = "baseline"  # "baseline" | "ml_analysis"
- 
+
 # --- Analysis Center (global center numbers) ---
 ANALYSIS_CORES = 4
 

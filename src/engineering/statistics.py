@@ -71,8 +71,9 @@ def window_util_thr(busy_periods, completion_times, window, now):
     return util_samples, thr_samples
 
 
-def export_bm_series_to_wide_csv(system, B, out_csv, burn_in=0, k_max=None):
+def export_bm_series_to_wide_csv(system, B, out_csv, burn_in=0, k_max=None, include_analysis_center=False):
     os.makedirs(os.path.dirname(out_csv) or ".", exist_ok=True)
+
     center = system.mitigation_manager.center
 
     series_map = {
@@ -82,7 +83,7 @@ def export_bm_series_to_wide_csv(system, B, out_csv, burn_in=0, k_max=None):
     for i, s in enumerate(system.spike_servers):
         series_map[f"spike{i}_rt"] = list(s.completed_jobs)
 
-    def n_eff(seq): 
+    def n_eff(seq):
         return max(0, len(seq) - burn_in)
 
     skipped = []
@@ -100,6 +101,7 @@ def export_bm_series_to_wide_csv(system, B, out_csv, burn_in=0, k_max=None):
             print(f"  - {n}: n_eff={m} < B={B}")
 
     now = system.env.now
+
     def add_util_thr(prefix, busy_periods, comp_times):
         if (len(comp_times) - burn_in) >= B:
             u, t = util_thr_per_batch(busy_periods, comp_times, B=B, burn_in=burn_in, k_max=k_max, tmax=now)
@@ -113,13 +115,39 @@ def export_bm_series_to_wide_csv(system, B, out_csv, burn_in=0, k_max=None):
         add_util_thr(f"spike{i}", s.busy_periods, s.completion_times)
     add_util_thr("mit", center.busy_periods, center.completion_times)
 
+    if include_analysis_center:
+        ac = system.mitigation_manager.analysis_center
+        if ac is None:
+            print("[export] Analysis center not present → skipped.")
+        else:
+
+            if hasattr(ac, "update"):
+                try:
+                    ac.update(now)
+                except Exception:
+                    pass
+
+            cj = list(getattr(ac, "completed_jobs", []))
+            ct = list(getattr(ac, "completion_times", []))
+            bp = list(getattr(ac, "busy_periods", []))
+
+            if n_eff(cj) >= B:
+                bm_dict["ana_rt"] = make_batch_means_series(cj, b=B, burn_in=burn_in, k_max=k_max)
+            else:
+                print("[export] Skipping ana_rt (n_eff < B)")
+
+            if n_eff(ct) >= B:
+                u, t = util_thr_per_batch(bp, ct, B=B, burn_in=burn_in, k_max=k_max, tmax=now)
+                bm_dict["ana_util"], bm_dict["ana_thr"] = u, t
+            else:
+                print("[export] Skipping ana_util/thr (n_eff < B)")
+
     if not bm_dict:
         raise ValueError("Nessuna colonna esportabile: tutti i centri sono sotto B.")
 
-    k_common = min(len(v) for v in bm_dict.values())
-
+    
     lengths = {c: len(bm_dict[c]) for c in bm_dict.keys()}
-    k_rows = max(lengths.values()) 
+    k_rows = max(lengths.values())
 
     ordered = []
     if "web_rt" in bm_dict:   ordered.append("web_rt")
@@ -139,12 +167,15 @@ def export_bm_series_to_wide_csv(system, B, out_csv, burn_in=0, k_max=None):
     if "mit_rt" in bm_dict:   ordered.append("mit_rt")
     if "mit_util" in bm_dict: ordered += ["mit_util", "mit_thr"]
 
+    if "ana_rt" in bm_dict:   ordered.append("ana_rt")
+    if "ana_util" in bm_dict: ordered += ["ana_util", "ana_thr"]
+
     def _pad_to(arr, L):
         a = np.asarray(arr, dtype=float)
         if a.size < L:
             pad = np.full(L - a.size, np.nan, dtype=float)
             a = np.concatenate([a, pad])
-        return a
+        return a[:L]
 
     data = {c: _pad_to(bm_dict[c], k_rows) for c in ordered}
 
@@ -152,49 +183,8 @@ def export_bm_series_to_wide_csv(system, B, out_csv, burn_in=0, k_max=None):
     df.to_csv(out_csv, index=False)
     return out_csv, ordered, k_rows
 
-def calculate_autocorrelation(data, K_LAG=50):
-    SIZE = K_LAG + 1
-    x = np.asarray(data, dtype=float)
-    n = int(x.size)
-    if n <= K_LAG:
-        raise ValueError(f"length of data must be greater than K (n={n}, K={K_LAG})")
-
-    hold = [0.0] * SIZE
-    cosum = [0.0] * SIZE
-    sum_x = 0.0
-    p = 0
-
-    hold[:SIZE] = x[:SIZE].tolist()
-    sum_x += float(np.sum(x[:SIZE]))
 
 
-    for i in range(SIZE, n):
-        xi = float(x[i])
-        for j in range(SIZE):
-            cosum[j] += hold[p] * hold[(p + j) % SIZE]
-        hold[p] = xi
-        sum_x += xi
-        p = (p + 1) % SIZE
-
-    for _ in range(n, n + SIZE):
-        for j in range(SIZE):
-            cosum[j] += hold[p] * hold[(p + j) % SIZE]
-        hold[p] = 0.0
-        p = (p + 1) % SIZE
-
-    mean = sum_x / n
-    for j in range(SIZE):
-        cosum[j] = (cosum[j] / (n - j)) - (mean * mean)
-
-    var0 = cosum[0]
-    if var0 <= 0:
-        stdev = 0.0
-        autocorr = [0.0] * K_LAG
-    else:
-        stdev = math.sqrt(var0)
-        autocorr = [cosum[j] / var0 for j in range(1, SIZE)]
-
-    return mean, stdev, autocorr, n
 
 def _batch_intervals_from_completions(completion_times, B, burn_in=0, k_max=None):
     ct = np.asarray(completion_times, dtype=float)
@@ -238,33 +228,49 @@ def util_thr_per_batch(busy_periods, completion_times, B, burn_in=0, k_max=None,
     return np.asarray(util), np.asarray(thr)
 
 
-def print_autocorrelation(file_path, columns=None, K_LAG=50, threshold=0.2, save_csv=None):
+def acf(data):
+    x = np.asarray(data, dtype=float)
+    x = x[~np.isnan(x)]
+    n = len(x)
+    if n <= 1:
+        return np.nan, n
+    mu = np.mean(x)
+    num = np.sum((x[:-1] - mu) * (x[1:] - mu))
+    den = np.sum((x - mu) ** 2)
+    if den == 0:
+        return 0.0, n
+    return num / den, n
+
+def print_autocorrelation(file_path, columns=None, save_csv=None):
+    
     df = pd.read_csv(file_path)
+
     if columns is None:
-        columns = [c for c in df.columns if np.issubdtype(df[c].dropna().dtype, np.number)]
+        columns = [c for c in df.columns
+                   if np.issubdtype(pd.to_numeric(df[c], errors="coerce").dtype, np.number)]
 
     results = []
     for col in columns:
-        s = pd.to_numeric(df[col], errors="coerce").dropna().to_numpy()
+        s = pd.to_numeric(df[col], errors="coerce").to_numpy()
+        s = s[~np.isnan(s)]
         try:
-            mean, stdev, ac, n = calculate_autocorrelation(s, K_LAG=K_LAG)
-            rho1 = ac[0] if ac else float("nan")
-            ok = (rho1) < threshold
-            print(f"{col}: rho_1={rho1:.3f}  → {'PASS' if ok else 'FAIL'}  (n={n})")
-            row = {
-                "metric": col, "n": n, "mean": mean, "stdev": stdev,
-                "rho_1": rho1, "pass_thr": int(ok)
-            }
-            
-            for k in range(1, K_LAG + 1):
-                rk = ac[k-1] if k-1 < len(ac) else np.nan
-                row[f"rho_{k}"] = rk
-            results.append(row)
+            rho1, n = acf(s)
+            if n <= 1 or np.isnan(rho1):
+                raise ValueError(f"n={n} <= 1")
+            K = 128
+            thr = 2.0 / np.sqrt(K)          # (Chatfield)
+            ok  = (abs(rho1) < thr)
+
+            print(f"{col}: rho_1={rho1:.3f}  (|rho1|<{thr:.3f}) → {'PASS' if ok else 'FAIL'}")
+            results.append({"metric": col, "n": n, "rho_1": rho1, "thr": thr, "pass_thr": int(ok)})
+
         except Exception as e:
-            print(f"Error {col}: {e}")
+            print(f"SKIP {col}: {e}")
 
     out = pd.DataFrame(results)
     if save_csv:
         os.makedirs(os.path.dirname(save_csv) or ".", exist_ok=True)
         out.to_csv(save_csv, index=False)
     return out
+
+

@@ -6,7 +6,7 @@ import pandas as pd
 from library.rngs import random, plantSeeds, getSeed, selectStream
 from engineering.costants import *
 from engineering.distributions import get_interarrival_time
-from utils.csv_writer import append_row_stable, validation_fieldnames, transitory_fieldnames, infinite_fieldnames
+from utils.csv_writer import append_row_stable, validation_fieldnames, transitory_fieldnames
 from model.job import Job
 from model.processor_sharing_server import ProcessorSharingServer
 from model.mitigation_manager import MitigationManager
@@ -898,9 +898,6 @@ def run_infinite_horizon(mode: str,
                          burn_in: int = 0,
                          arrival_p=None, arrival_l1=None, arrival_l2=None,
                          model: str = "baseline"):
-    
-    if mode not in ("verification", "standard"):
-        raise ValueError("mode must be 'verification' or 'standard'")
 
     if arrival_p is None:
         arrival_p = ARRIVAL_P
@@ -910,76 +907,43 @@ def run_infinite_horizon(mode: str,
     env = simpy.Environment()
     system = DDoSSystem(env, mode, arrival_p, arrival_l1, arrival_l2, variant=model)
     env.run()
+    
+    if model == "ml_analysis":
+        batch_size = BATCH_SIZE_IMPROVED
+        n_batches = N_BATCH_IMPROVED
+        improved = True
+    elif model == "baseline":
+        batch_size = BATCH_SIZE
+        n_batches = N_BATCH
+        improved = False
+    else:
+        raise ValueError(f"Unknown model: {model}")
 
     print("\n==== START BATCH MEANS ====")
-    csv_path, cols, k = export_bm_series_to_wide_csv(
+
+    csv_path, cols, k_rows = export_bm_series_to_wide_csv(
         system,
-        B=BATCH_SIZE,
+        B=batch_size,
         out_csv=out_csv,
         burn_in=burn_in,
-        k_max=None
-    )
-    print(f"[OK] bm_series in {csv_path} ({k} righe). Colonne: {cols}")
+        k_max=n_batches,
+        include_analysis_center=improved)
 
-    ac = system.mitigation_manager.analysis_center
-    if ac is not None:
-        now = system.env.now
-        ac.update(now)
-
-        ana_util_series, ana_thr_series = system._window_util_thr_analysis_rate_based(
-            ac, TIME_WINDOW, now
-        )
-
-        rts = list(ac.completed_jobs)[burn_in:]
-        n_batches_rt = len(rts) // BATCH_SIZE
-        rt_series_ac = []
-        for i in range(n_batches_rt):
-            chunk = rts[i * BATCH_SIZE:(i + 1) * BATCH_SIZE]
-            if chunk:
-                rt_series_ac.append(float(np.mean(chunk)))
-
-        df = pd.read_csv(csv_path)
-
-        def _pad(series, L):
-            s = list(series)
-            if len(s) < L:
-                s = s + [np.nan] * (L - len(s))
-            return s[:L]
-
-        L = len(df)
-        df["ana_rt"]   = _pad(rt_series_ac,   L)
-        df["ana_util"] = _pad(ana_util_series, L)
-        df["ana_thr"]  = _pad(ana_thr_series,  L)
-        df.to_csv(csv_path, index=False)
-
-        cols = [c for c in cols] + ["ana_rt", "ana_util", "ana_thr"]
-
-    _fix_wide_csv_on_disk(csv_path, min_rows=64)
-
-    df = pd.read_csv(csv_path)
-
-    cols = [c for c in cols if c in df.columns and df[c].notna().sum() >= 2]
-    if not cols:
-        print("[WARN] Nessuna colonna con almeno 2 punti per ACF. Salto il calcolo.")
-        return None
-
-    n_per_col = {c: int(df[c].notna().sum()) for c in cols}
-    min_n = min(n_per_col.values())
-    K_dyn = max(1, min(50, min_n - 1))
-
-    out_acs_clean = out_acs.replace(" ", "_")
-
+    print("\n==== START AUTOCORRELATION ====")
+    out_acs_clean = (out_acs or "").replace(" ", "_") or None
     try:
         res_df = print_autocorrelation(
             file_path=csv_path,
             columns=cols,
-            K_LAG=K_dyn,          
-            threshold=0.2,
             save_csv=out_acs_clean
         )
-        print(f"[OK] ACF salvata in: {out_acs_clean}")
-        print(f"[info] ACF K dinamico = {K_dyn} (min punti tra {cols} = {min_n})")
+        if out_acs_clean:
+            print(f"[OK] ACF salvata in: {out_acs_clean}")
         return res_df
     except Exception as e:
         print(f"[ERROR] ACF fallita: {e}")
         return None
+
+
+
+
