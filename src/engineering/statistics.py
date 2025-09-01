@@ -241,8 +241,8 @@ def acf(data):
         return 0.0, n
     return num / den, n
 
-def print_autocorrelation(file_path, columns=None, save_csv=None):
-    
+def print_autocorrelation(file_path, K, columns=None, save_csv=None):
+
     df = pd.read_csv(file_path)
 
     if columns is None:
@@ -257,7 +257,6 @@ def print_autocorrelation(file_path, columns=None, save_csv=None):
             rho1, n = acf(s)
             if n <= 1 or np.isnan(rho1):
                 raise ValueError(f"n={n} <= 1")
-            K = 128
             thr = 2.0 / np.sqrt(K)          # (Chatfield)
             ok  = (abs(rho1) < thr)
 

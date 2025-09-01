@@ -934,6 +934,7 @@ def run_infinite_horizon(mode: str,
     try:
         res_df = print_autocorrelation(
             file_path=csv_path,
+            K=n_batches,
             columns=cols,
             save_csv=out_acs_clean
         )
