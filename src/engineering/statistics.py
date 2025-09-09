@@ -180,7 +180,7 @@ def export_bm_series_to_wide_csv(system, B, out_csv, burn_in=0, k_max=None, incl
     data = {c: _pad_to(bm_dict[c], k_rows) for c in ordered}
 
     df = pd.DataFrame(data)
-    df.to_csv(out_csv, index=False)
+    df.to_csv(out_csv, index=False, float_format="%.10f")
     return out_csv, ordered, k_rows
 
 

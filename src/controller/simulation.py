@@ -825,12 +825,12 @@ def run_finite_horizon(mode: str, scenario: str, out_csv: str, model: str = "bas
 
     fieldnames = transitory_fieldnames(MAX_SPIKE_NUMBER)
     all_logs = []
+    s = []
 
     if mode == "transitory":
+        plantSeeds(123456789)
         for rep in range(REPLICATION_FACTOR_TRANSITORY):
-            seed = SEEDS_TRANSITORY[rep % len(SEEDS_TRANSITORY)]
-            plantSeeds(seed)
-
+            
             env = simpy.Environment()
             system = DDoSSystem(env, mode, arrival_p, arrival_l1, arrival_l2, variant=model)
 
@@ -855,11 +855,13 @@ def run_finite_horizon(mode: str, scenario: str, out_csv: str, model: str = "bas
             env.process(checkpointer_optimized(env, system, rep))
             env.run(until=STOP_CONDITION_TRANSITORY)
             print(f"Replica {rep+1} completata!")
+            
+            s.append(getSeed())
 
     elif mode == "finite simulation":
         seeds = [1234566789]
+        plantSeeds(seeds[0])
         for rep in range(REPLICATION_FACTORY_FINITE_SIMULATION):
-            plantSeeds(seeds[rep])
             env = simpy.Environment()
             system = DDoSSystem(env, mode, arrival_p, arrival_l1, arrival_l2, variant=model)
 
@@ -887,10 +889,10 @@ def run_finite_horizon(mode: str, scenario: str, out_csv: str, model: str = "bas
             env.process(checkpointer(env, system, rep))
             env.run(until=STOP_CONDITION_FINITE_SIMULATION)
 
-            selectStream(RNG_STREAM)
-            seeds.append(getSeed())
+            # selectStream(RNG_STREAM)
+            # seeds.append(getSeed())
 
-    return all_logs
+    return all_logs, s
 
 def run_infinite_horizon(mode: str,
                          out_csv: str,

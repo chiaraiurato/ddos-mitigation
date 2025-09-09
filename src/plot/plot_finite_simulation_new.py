@@ -333,5 +333,5 @@ def main():
 
     print(f"[OK] Grafici e tabelle salvati in: {outdir.resolve()}")
 
-if __name__ == "main":
+if __name__ == "__main__":
     main()
